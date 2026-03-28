@@ -165,34 +165,91 @@
           本地模型设置
         </div>
 
+        <div class="provider-selector">
+          <div
+              class="provider-card"
+              :class="{ active: currentLocalType === 'inference' }"
+              @click="currentLocalType = 'inference'"
+          >
+            <div class="provider-logo other-bg">
+              <i class="el-icon-chat-dot-round" style="font-size: 24px; color: #1890ff;"></i>
+            </div>
+            <div class="provider-info">
+              <div class="name">问数大模型</div>
+              <div class="desc">Inference Model</div>
+            </div>
+            <div class="check-mark" v-if="currentLocalType === 'inference'">
+              <i class="el-icon-check"></i>
+            </div>
+          </div>
+
+          <div
+              class="provider-card"
+              :class="{ active: currentLocalType === 'embedding' }"
+              @click="currentLocalType = 'embedding'"
+          >
+            <div class="provider-logo deepseek-bg">
+              <i class="el-icon-collection" style="font-size: 24px; color: #1890ff;"></i>
+            </div>
+            <div class="provider-info">
+              <div class="name">嵌入大模型</div>
+              <div class="desc">Embedding Model</div>
+            </div>
+            <div class="check-mark" v-if="currentLocalType === 'embedding'">
+              <i class="el-icon-check"></i>
+            </div>
+          </div>
+
+          <div
+              class="provider-card"
+              :class="{ active: currentLocalType === 'rerank' }"
+              @click="currentLocalType = 'rerank'"
+          >
+            <div class="provider-logo gpt-bg">
+              <i class="el-icon-sort" style="font-size: 24px; color: #67c23a;"></i>
+            </div>
+            <div class="provider-info">
+              <div class="name">排序大模型</div>
+              <div class="desc">Rerank Model</div>
+            </div>
+            <div class="check-mark" v-if="currentLocalType === 'rerank'">
+              <i class="el-icon-check"></i>
+            </div>
+          </div>
+        </div>
+
+        <el-divider></el-divider>
+
+        <div class="section-title">
+          <span class="icon-wrapper blue"><i class="el-icon-setting"></i></span>
+          参数配置
+        </div>
+
         <el-form :model="localForm" :rules="localRules" ref="localFormRef" label-position="top" class="sqlbot-form">
-          <el-row :gutter="40">
-            <el-col :span="24">
-              <el-form-item label="选择本地模型" prop="model">
-                <el-select
-                    v-model="localForm.model"
-                    placeholder="请选择本地模型"
-                    style="width: 100%"
-                    filterable
-                    :loading="localModelLoading"
-                    @focus="fetchLocalModels"
-                >
-                  <el-option
-                      v-for="item in localModelOptions"
-                      :key="item.value"
-                      :label="item.label"
-                      :value="item.value">
-                    <span style="float: left; font-weight: 500">{{ item.label }}</span>
-                    <span style="float: right; color: #8492a6; font-size: 13px">{{ item.value }}</span>
-                  </el-option>
-                </el-select>
+          <el-row :gutter="24">
+            <el-col :span="12">
+              <el-form-item label="模型版本名称 (Model Name)" :prop="currentLocalType + 'Model'">
+                <el-input
+                    v-model="localForm[currentLocalType + 'Model']"
+                    placeholder="请输入模型版本名称"
+                    prefix-icon="el-icon-cpu">
+                </el-input>
+              </el-form-item>
+            </el-col>
+            <el-col :span="12">
+              <el-form-item label="模型部署地址 (Base URL)" :prop="currentLocalType + 'Url'">
+                <el-input
+                    v-model="localForm[currentLocalType + 'Url']"
+                    placeholder="例如: http://192.168.1.100:8000/v1"
+                    prefix-icon="el-icon-link">
+                </el-input>
               </el-form-item>
             </el-col>
           </el-row>
 
           <div class="form-actions">
-            <el-button class="secondary-btn" icon="el-icon-refresh" @click="fetchLocalModels" :loading="localModelLoading">刷新模型列表</el-button>
-            <el-button type="primary" class="primary-btn" icon="el-icon-check" @click="saveLocalConfig" :loading="llmSaving">保存本地配置</el-button>
+            <el-button class="secondary-btn" icon="el-icon-connection" @click="testLocalConnection" :loading="localTesting">测试连接</el-button>
+            <el-button type="primary" class="primary-btn" icon="el-icon-check" @click="saveLocalConfig" :loading="localSaving" :disabled="!localTestStatus[currentLocalType]">保存本地配置</el-button>
           </div>
         </el-form>
       </div>
@@ -272,14 +329,30 @@ export default {
       },
 
       // 本地模型数据
+      currentLocalType: 'inference',
+      localTesting: false,
+      localSaving: false,
+      localTestStatus: {
+        inference: false,
+        embedding: false,
+        rerank: false
+      },
       localForm: {
-        model: ''
+        inferenceUrl: '',
+        inferenceModel: '',
+        embeddingUrl: '',
+        embeddingModel: '',
+        rerankUrl: '',
+        rerankModel: ''
       },
       localRules: {
-        model: [{ required: true, message: '请选择本地模型', trigger: 'change' }]
+        inferenceUrl: [{ required: true, message: '请输入模型部署地址', trigger: 'blur' }],
+        inferenceModel: [{ required: true, message: '请输入模型版本名称', trigger: 'blur' }],
+        embeddingUrl: [{ required: true, message: '请输入模型部署地址', trigger: 'blur' }],
+        embeddingModel: [{ required: true, message: '请输入模型版本名称', trigger: 'blur' }],
+        rerankUrl: [{ required: true, message: '请输入模型部署地址', trigger: 'blur' }],
+        rerankModel: [{ required: true, message: '请输入模型版本名称', trigger: 'blur' }]
       },
-      localModelOptions: [],
-      localModelLoading: false,
 
       // 前端显示 Provider -> 后端存储 Provider 的映射
       providerValueMap: {
@@ -329,7 +402,13 @@ export default {
         this.isTestPassed = false;
       },
       deep: true
-    }
+    },
+    'localForm.inferenceUrl'() { this.localTestStatus.inference = false; },
+    'localForm.inferenceModel'() { this.localTestStatus.inference = false; },
+    'localForm.embeddingUrl'() { this.localTestStatus.embedding = false; },
+    'localForm.embeddingModel'() { this.localTestStatus.embedding = false; },
+    'localForm.rerankUrl'() { this.localTestStatus.rerank = false; },
+    'localForm.rerankModel'() { this.localTestStatus.rerank = false; }
   },
   computed: {
     currentModelOptions() {
@@ -348,16 +427,7 @@ export default {
   methods: {
     // 切换模式处理
     handleModeChange(val) {
-      if (val === 'local') {
-        // 切换到本地时，如果列表为空，自动请求一次列表接口
-        if (this.localModelOptions.length === 0) {
-          this.fetchLocalModels();
-        }
-        // 如果之前有保存的模型名，尝试回填
-        if (this.llmForm.model) {
-          this.localForm.model = this.llmForm.model;
-        }
-      } else {
+      if (val === 'online') {
         // 切换回在线，重新检测一下 Provider
         this.detectProvider();
       }
@@ -381,20 +451,12 @@ export default {
     },
 
     loadLlmConfig() {
+      // 在线模型配置获取
       configRequest.get('/config/get').then(res => {
         if (res.code === '200' && res.data) {
           const data = res.data;
 
-          // 修复：不再根据后端配置自动切换模式，始终显示在线模式
-          // 用户可以手动切换到本地模式
-          // 只回填对应模式的数据，不改变 modelMode
-          
-          if (data.type === 'LOCAL') {
-            // 如果后端配置是本地模型，只回填本地模型数据
-            this.localForm.model = data.model || '';
-            // 不再自动切换：this.modelMode = 'local';
-            // 不再自动加载：this.fetchLocalModels();
-          } else {
+          if (data.type !== 'LOCAL') {
             // 回填在线配置
             this.llmForm = {
               apiBaseUrl: data.apiBaseUrl || '',
@@ -411,7 +473,22 @@ export default {
             }
           }
         }
-      }).catch(err => console.error('加载LLM配置失败:', err));
+      }).catch(err => console.error('加载LLM在线配置失败:', err));
+
+      // 本地模型配置获取
+      configRequest.get('/vllm/config').then(res => {
+        if (res.code === '200' && res.data) {
+          this.localForm = {
+            inferenceUrl: res.data.inferenceUrl || '',
+            inferenceModel: res.data.inferenceModel || '',
+            embeddingUrl: res.data.embeddingUrl || '',
+            embeddingModel: res.data.embeddingModel || '',
+            rerankUrl: res.data.rerankUrl || '',
+            rerankModel: res.data.rerankModel || ''
+          };
+          this.localTestStatus = { inference: false, embedding: false, rerank: false };
+        }
+      }).catch(err => console.error('加载LLM本地配置失败:', err));
     },
 
     detectProvider() {
@@ -429,52 +506,63 @@ export default {
       }
     },
 
-    // --- 接口：获取本地模型列表 ---
-    fetchLocalModels() {
-      this.localModelLoading = true;
-      // 调用 V2 文档中的本地模型接口
-      configRequest.get('/config/localModels').then(res => {
-        if (res.code === '200') {
-          // 映射后端返回的 data: [{modelName, modelCode, id}]
-          this.localModelOptions = (res.data || []).map(item => ({
-            label: item.modelName,
-            value: item.modelCode
-          }));
-        } else {
-          this.$message.warning(res.msg || '获取本地模型列表失败');
+    testLocalConnection() {
+      this.$refs.localFormRef.validate(valid => {
+        if (valid) {
+          this.localTesting = true;
+          const urlField = `${this.currentLocalType}Url`;
+          const modelField = `${this.currentLocalType}Model`;
+          
+          const endpointMap = {
+            inference: '/vllm/test/inference',
+            embedding: '/vllm/test/embedding',
+            rerank: '/vllm/test/rerank'
+          };
+          
+          configRequest.post(endpointMap[this.currentLocalType], {
+            url: this.localForm[urlField],
+            model: this.localForm[modelField]
+          }).then(res => {
+            if (res.code === '200') {
+              this.$message.success('连通性测试成功');
+              this.localTestStatus[this.currentLocalType] = true;
+            } else {
+              this.$message.error(res.msg || '连接失败');
+              this.localTestStatus[this.currentLocalType] = false;
+            }
+          }).catch(() => {
+            this.$message.error('测试连接请求异常');
+            this.localTestStatus[this.currentLocalType] = false;
+          }).finally(() => { this.localTesting = false; });
         }
-      }).catch(err => {
-        console.error('获取本地模型失败:', err);
-        this.$message.error('获取本地模型列表请求异常');
-      }).finally(() => {
-        this.localModelLoading = false;
       });
     },
 
     saveLocalConfig() {
+      if (!this.localTestStatus[this.currentLocalType]) {
+        this.$message.warning('请先进行连通性测试并成功后才能保存');
+        return;
+      }
+      
       this.$refs.localFormRef.validate(valid => {
         if (valid) {
-          this.llmSaving = true;
-          // 构造本地配置参数 (V2 文档)
-          // apiKey 和 apiBaseUrl 为必填字段，但本地模式不需要，传空字符串
+          this.localSaving = true;
+          const urlField = `${this.currentLocalType}Url`;
+          const modelField = `${this.currentLocalType}Model`;
+          
+          // 仅提交当前修改的这组模型参数
           const payload = {
-            type: 'LOCAL',
-            provider: 'Local', // 或者 null，视后端逻辑而定，建议传 'Local' 或不传
-            apiKey: 'local',   // 传非空占位符以通过后端校验，或者空字符串
-            apiBaseUrl: 'local',
-            model: this.localForm.model,
-            timeout: 60
+            [urlField]: this.localForm[urlField] || null,
+            [modelField]: this.localForm[modelField] || null
           };
 
-          configRequest.post('/config/save', payload).then(res => {
+          configRequest.post('/vllm/config', payload).then(res => {
             if (res.code === '200') {
               this.$message.success('本地模型配置已保存');
-              // 同步更新到 llmForm
-              this.llmForm.model = this.localForm.model;
             } else {
               this.$message.error(res.msg || '保存失败');
             }
-          }).finally(() => { this.llmSaving = false; });
+          }).finally(() => { this.localSaving = false; });
         }
       });
     },
@@ -519,18 +607,6 @@ export default {
           }).then(res => {
             if (res.code === '200') {
               this.$message.success('连接成功');
-
-              // 展示模型实际回复内容 (data 中包含 "连接成功！<br>模型回复：...")
-              if (res.data) {
-                this.$notify({
-                  title: '连通性测试结果',
-                  dangerouslyUseHTMLString: true,
-                  message: `<div style="color: #666; font-size: 13px;">${res.data}</div>`,
-                  type: 'success',
-                  duration: 5000
-                });
-              }
-
               this.isTestPassed = true;
             } else {
               // 处理错误信息 (余额不足等)
