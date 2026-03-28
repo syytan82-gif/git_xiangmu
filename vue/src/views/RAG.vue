@@ -696,9 +696,7 @@ export default {
       const userMessageId = this.currentMessagesData[userMsgIndex].messageId;
 
       // 调用后端接口删除该 AI 消息及对应的用户消息
-      request.delete(`/chat/message/${aiMessageId}`, {
-        params: { userId: userMessageId }
-      }).then(res => {
+      request.delete(`/chat/message/${aiMessageId}/${userMessageId}`).then(res => {
         if (res.data.code === '200') {
           // 后端删除成功，本地同步移除
           this.currentMessagesData.splice(userMsgIndex);
