@@ -553,9 +553,37 @@ export default {
 
     copyContent(text) {
       if (!text) return;
-      navigator.clipboard.writeText(text).then(() => {
-        this.$message.success('已复制到剪贴板');
-      });
+      const fallbackCopy = (content) => {
+        const textarea = document.createElement('textarea');
+        textarea.value = content;
+        textarea.style.position = 'fixed';
+        textarea.style.top = '0';
+        textarea.style.left = '0';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        try {
+          const successful = document.execCommand('copy');
+          if (successful) {
+            this.$message.success('复制成功');
+          } else {
+            this.$message.error('复制失败');
+          }
+        } catch (err) {
+          this.$message.error('复制失败');
+        }
+        document.body.removeChild(textarea);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+          this.$message.success('复制成功');
+        }).catch(() => {
+          fallbackCopy(text);
+        });
+      } else {
+        fallbackCopy(text);
+      }
     },
 
     handleGlobalClick(e) {
@@ -564,14 +592,46 @@ export default {
       if (target.tagName === 'I' && target.parentElement && target.parentElement.classList.contains('copy-btn')) {
         target = target.parentElement;
       }
-      // 安全检查：确保 target 有 classList 属性
+      // 安全检查：确保 classList 存在
       if (target.classList && target.classList.contains('copy-btn')) {
         const header = target.parentElement;
-        const codeWrapper = header ? header.parentElement : null;
-        const pre = codeWrapper ? codeWrapper.querySelector('pre') : null;
+        if (!header) return;
+        const codeWrapper = header.parentElement;
+        if (!codeWrapper) return;
+        const pre = codeWrapper.querySelector('pre');
         const code = pre ? pre.innerText : '';
         if (code) {
-          navigator.clipboard.writeText(code).then(() => this.$message.success('复制成功'));
+          const fallbackCopy = (content) => {
+            const textarea = document.createElement('textarea');
+            textarea.value = content;
+            textarea.style.position = 'fixed';
+            textarea.style.top = '0';
+            textarea.style.left = '0';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.focus();
+            textarea.select();
+            try {
+              const successful = document.execCommand('copy');
+              if (successful) {
+                this.$message.success('复制成功');
+              } else {
+                this.$message.error('复制失败');
+              }
+            } catch (err) {
+              this.$message.error('复制失败');
+            }
+            document.body.removeChild(textarea);
+          };
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(code).then(() => {
+              this.$message.success('复制成功');
+            }).catch(() => {
+              fallbackCopy(code);
+            });
+          } else {
+            fallbackCopy(code);
+          }
         }
       }
     },
@@ -580,7 +640,8 @@ export default {
       const el = this.$refs.inputRef;
       if (!el) return;
       el.style.height = 'auto';
-      el.style.height = `${Math.min(el.scrollHeight, this.maxHeight)}px`;
+      const newHeight = el.value ? Math.min(el.scrollHeight, this.maxHeight) : this.minHeight;
+      el.style.height = `${newHeight}px`;
     },
 
     scrollToBottom() {
@@ -1074,7 +1135,7 @@ export default {
 .messages-container {
   flex: 1;
   overflow-y: auto;
-  padding: 40px 0;
+  padding: 40px 0 100px;
   background-color: #fff;
   scroll-behavior: smooth;
 }
@@ -1457,11 +1518,12 @@ export default {
 
 /* Input Area */
 .input-area-wrapper {
-  flex-shrink: 0;
+  position: absolute;
+  bottom: 0;
+  left: 0;
   width: 100%;
-  background: #fff;
-  padding: 20px 20px 80px; 
-  border-top: 1px solid var(--border-color);
+  background: linear-gradient(to bottom, rgba(255,255,255,0) 0%, rgba(255,255,255,1) 20%);
+  padding: 24px 20px 20px;
   display: flex;
   flex-direction: column;
   align-items: center;
