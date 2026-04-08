@@ -38,10 +38,21 @@
           <span slot="title">用户权限管理</span>
         </el-menu-item>
 
-        <el-menu-item index="/set/user-management">
-          <i class="el-icon-user"></i>
-          <span slot="title">用户管理</span>
-        </el-menu-item>
+        <el-submenu index="user-center">
+          <template slot="title">
+            <i class="el-icon-user"></i>
+            <span>用户管理中心</span>
+          </template>
+          <el-menu-item index="/set/user-management">
+            <span slot="title">用户管理</span>
+          </el-menu-item>
+          <el-menu-item index="/set/query-stats">
+            <span slot="title">提问统计</span>
+          </el-menu-item>
+          <el-menu-item index="/set/query-detail">
+            <span slot="title">提问明细</span>
+          </el-menu-item>
+        </el-submenu>
       </el-menu>
     </div>
 

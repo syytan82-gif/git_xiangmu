@@ -2,7 +2,7 @@ const { defineConfig } = require('@vue/cli-service')
 module.exports = defineConfig({
     transpileDependencies: true,
     devServer: {
-        port: 8085,
+        port: 8080,
         allowedHosts: 'all',
         historyApiFallback: true, // 支持 HTML5 History 模式
         client: {

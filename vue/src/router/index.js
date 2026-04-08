@@ -47,6 +47,14 @@ const routes = [
           {
             path: 'user-management', name: 'UserManagement', meta: { name: '用户管理' }, component: () => import('../views/manager/User.vue')
           },
+          // 提问统计
+          {
+            path: 'query-stats', name: 'QueryStats', meta: { name: '提问统计' }, component: () => import('../views/manager/QueryStats.vue')
+          },
+          // 提问明细
+          {
+            path: 'query-detail', name: 'QueryDetail', meta: { name: '提问明细' }, component: () => import('../views/manager/QueryDetail.vue')
+          },
           // 原有的：文件上传 (问数)
           {
             path: 'file-upload', name: 'FileUpload', meta: { name: '问数文件上传' }, component: () => import('../views/manager/FileUpload.vue')
