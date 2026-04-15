@@ -122,7 +122,9 @@
             <template slot-scope="scope">
               <el-tag v-if="scope.row.status === '1'" type="success" size="small" effect="plain">解析成功</el-tag>
               <el-tag v-else-if="scope.row.status === '-1'" type="danger" size="small" effect="plain">解析失败</el-tag>
-              <el-tag v-else type="warning" size="small" effect="plain">解析中</el-tag>
+              <el-tag v-else type="warning" size="small" effect="plain" class="parsing-tag">
+                <i class="el-icon-loading" style="margin-right: 4px;"></i>解析中
+              </el-tag>
             </template>
           </el-table-column>
 
@@ -312,7 +314,7 @@ export default {
     this.fetchDocList();
   },
   beforeDestroy() {
-      if(this.refreshTimer) clearInterval(this.refreshTimer);
+      this.stopStatusPolling();
   },
   methods: {
     // ---------------- Folder Management ----------------
@@ -670,10 +672,12 @@ export default {
         }
         
         if (successCount > 0) {
-          this.$message.success(`成功上传 ${successCount} 个文件!`);
+          this.$message.success(`成功上传 ${successCount} 个文件，正在后台解析...`);
           this.dialog.upload.visible = false;
           this.dialog.upload.fileList = [];
           this.refreshDocList();
+          // 启动自动轮询，实时更新解析状态
+          this.startStatusPolling();
         }
       }).catch(err => {
         this.loading.upload = false;
@@ -860,6 +864,68 @@ export default {
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
       e.preventDefault();
+    },
+
+    // ---------------- Status Polling ----------------
+    startStatusPolling() {
+      // 先清除已有的定时器，避免重复
+      this.stopStatusPolling();
+      
+      const POLL_INTERVAL = 5000; // 每5秒轮询一次
+      const MAX_POLL_COUNT = 120; // 最多轮询120次（10分钟）
+      let pollCount = 0;
+      
+      this.refreshTimer = setInterval(() => {
+        pollCount++;
+        
+        // 超过最大轮询次数则停止
+        if (pollCount >= MAX_POLL_COUNT) {
+          this.$message.warning('部分文档解析时间较长，请稍后手动刷新查看状态');
+          this.stopStatusPolling();
+          return;
+        }
+        
+        // 静默刷新文档列表（不显示loading）
+        const params = {};
+        if (this.searchKeyword) {
+          params.keyword = this.searchKeyword;
+        }
+        if (this.currentFolderId !== null) {
+          params.folderId = this.currentFolderId;
+        }
+        
+        const url = this.searchKeyword ? '/kb/search-docs' : '/kb/list-docs';
+        
+        ragRequest.get(url, { params }).then(res => {
+          if (res.data.code === '200') {
+            const rawList = res.data.data || [];
+            this.docList = rawList.map(doc => ({
+              ...doc,
+              enabledBoolean: doc.enabled === 1 || doc.enabled === '1'
+            }));
+            
+            // 检查是否还有文档在解析中
+            const hasParsing = this.docList.some(
+              doc => doc.status !== '1' && doc.status !== '-1'
+            );
+            
+            if (!hasParsing) {
+              // 所有文档解析完成，停止轮询
+              this.stopStatusPolling();
+              this.$message.success('所有文档解析完成');
+            }
+          }
+        }).catch(err => {
+          console.error('轮询文档状态失败:', err);
+        });
+      }, POLL_INTERVAL);
+    },
+    
+    stopStatusPolling() {
+      if (this.refreshTimer) {
+        clearInterval(this.refreshTimer);
+        this.refreshTimer = null;
+      }
     }
   }
 };
@@ -1282,6 +1348,16 @@ export default {
   padding: 8px 20px;
   border-radius: 8px;
   font-weight: 500;
+}
+
+/* 解析中标签动画 */
+.parsing-tag {
+  animation: parsing-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes parsing-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
 }
 
 /* 响应式 */

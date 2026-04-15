@@ -27,6 +27,11 @@
             <span>首页</span>
           </el-menu-item>
 
+          <el-menu-item index="/dashboard" v-if="user.role !== 'USER'">
+            <i class="el-icon-data-line"></i>
+            <span>数据大屏</span>
+          </el-menu-item>
+
           <el-menu-item index="/set"  v-if="user.role !== 'USER'">
             <i class="el-icon-setting"></i>
             <span>设置</span>
@@ -114,6 +119,10 @@ export default {
       // 核心修复：如果当前路径属于 /set 开头（设置模块的子页面），手动让菜单保持在 /set 高亮
       if (this.$route.path.startsWith('/set')) {
         return '/set';
+      }
+      // 数据大屏子路由也保持高亮
+      if (this.$route.path.startsWith('/dashboard')) {
+        return '/dashboard';
       }
       return this.$route.path;
     }

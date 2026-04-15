@@ -26,6 +26,7 @@ const routes = [
       { path: 'text2sql', name: 'Text2sql', meta: { name: '智能问数' }, component: () => import('../views/Text2sql.vue') },
       { path: 'rag', name: 'RAG', meta: { name: '智能问答' }, component: () => import('../views/RAG.vue') },
       { path: 'smart-form', name: 'Former', meta: { name: '智能填表' }, component: () => import('../views/Former.vue') },
+      { path: 'dashboard', name: 'DashboardList', meta: { name: '数据大屏' }, component: () => import('../views/DashboardList.vue') },
 
       // --- 系统设置页面及其子路由 (修改部分) ---
       {
@@ -73,6 +74,8 @@ const routes = [
   },
   { path: '/login', name: 'Login', meta: { name: '登录' }, component: () => import('../views/Login.vue') },
   { path: '/register', name: 'Register', meta: { name: '注册' }, component: () => import('../views/Register.vue') },
+  // 数据大屏全屏查看（独立于 Manager 布局，无顶部导航栏）
+  { path: '/dashboard/:id', name: 'DashboardView', meta: { name: '数据大屏' }, component: () => import('../views/DashboardView.vue'), props: true },
   { path: '*', name: 'NotFound', meta: { name: '无法访问' }, component: () => import('../views/404.vue') },
 
 ]
