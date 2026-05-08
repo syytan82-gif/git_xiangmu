@@ -103,6 +103,20 @@
                   <el-tooltip v-if="msg.role === 1 && index === lastAiIndex && !loading" content="重新回答" placement="top" :open-delay="500">
                     <i class="el-icon-refresh action-icon" @click="regenerateAnswer(index)"></i>
                   </el-tooltip>
+                  <el-tooltip v-if="msg.role === 1 && msg.messageId" :content="msg.evaluation === 'like' ? '取消点赞' : '点赞'" placement="top" :open-delay="500">
+                    <i
+                        class="el-icon-thumb action-icon thumb-up"
+                        :class="{ active: msg.evaluation === 'like', disabled: !!evaluationLoadingMap[msg.messageId] }"
+                        @click="handleLikeClick(msg)"
+                    ></i>
+                  </el-tooltip>
+                  <el-tooltip v-if="msg.role === 1 && msg.messageId" :content="msg.evaluation === 'dislike' ? '取消点踩' : '点踩'" placement="top" :open-delay="500">
+                    <i
+                        class="el-icon-thumb action-icon thumb-down"
+                        :class="{ active: msg.evaluation === 'dislike', disabled: !!evaluationLoadingMap[msg.messageId] }"
+                        @click="handleDislikeClick(msg)"
+                    ></i>
+                  </el-tooltip>
                   <el-tooltip content="复制" placement="top" :open-delay="500">
                     <i class="el-icon-document-copy action-icon" @click="copyContent(msg.content)"></i>
                   </el-tooltip>
@@ -199,6 +213,44 @@
         ></iframe>
       </div>
     </el-dialog>
+
+    <!-- 点踩反馈弹窗 -->
+    <el-dialog
+        title="反馈"
+        :visible.sync="feedbackDialogVisible"
+        width="520px"
+        custom-class="feedback-dialog"
+        :close-on-click-modal="false"
+        @close="resetFeedbackDialog"
+    >
+      <div class="feedback-dialog-body">
+        <div class="feedback-reason-list">
+          <span
+              v-for="reason in feedbackReasonOptions"
+              :key="reason"
+              class="feedback-reason-tag"
+              :class="{ active: feedbackSelectedReason === reason }"
+              @click="toggleFeedbackReason(reason)"
+          >
+            {{ reason }}
+          </span>
+        </div>
+        <el-input
+            v-model="feedbackInput"
+            type="textarea"
+            :rows="5"
+            resize="none"
+            maxlength="500"
+            show-word-limit
+            class="feedback-textarea"
+            placeholder="我们想知道你对此次回答不满意的原因，你认为更好的回答是什么？"
+        ></el-input>
+      </div>
+      <span slot="footer" class="dialog-footer">
+        <el-button @click="feedbackDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="feedbackSubmitting" @click="submitDislikeFeedback">提交</el-button>
+      </span>
+    </el-dialog>
   </div>
 </template>
 
@@ -282,6 +334,13 @@ export default {
       pdfPreviewUrl: '',
       pdfPreviewTitle: '文档预览',
       pdfLoading: false,
+      evaluationLoadingMap: {},      // { [messageId]: boolean } 点赞/点踩接口状态
+      feedbackDialogVisible: false,  // 点踩反馈弹窗
+      feedbackSubmitting: false,     // 反馈提交 loading
+      feedbackTargetMessageId: null, // 当前反馈对应的消息 ID
+      feedbackSelectedReason: '',    // 已选反馈标签
+      feedbackInput: '',             // 反馈输入内容
+      feedbackReasonOptions: ['回答不准确', '内容不完整', '解释不清楚', '与问题无关', '响应太慢', '其他']
     };
   },
   computed: {
@@ -371,7 +430,9 @@ export default {
               content: item.content,
               displayedContent: item.content,
               messageId: item.id,
-              referDoc: referDoc
+              referDoc: referDoc,
+              evaluation: item.evaluation || null,
+              feedback: item.feedback || null
             };
           });
           this.scrollToBottom();
@@ -465,7 +526,9 @@ export default {
               content: replyContent,
               displayedContent: replyContent,
               messageId: aiMsg.id,
-              referDoc: aiMsg.referDoc || null
+              referDoc: aiMsg.referDoc || null,
+              evaluation: aiMsg.evaluation || null,
+              feedback: aiMsg.feedback || null
             });
           } else {
             const newMsgIndex = this.currentMessagesData.length;
@@ -475,7 +538,9 @@ export default {
               content: replyContent,
               displayedContent: '',
               messageId: aiMsg.id,
-              referDoc: aiMsg.referDoc || null
+              referDoc: aiMsg.referDoc || null,
+              evaluation: aiMsg.evaluation || null,
+              feedback: aiMsg.feedback || null
             });
             
             this.typewriterEffect(replyContent, newMsgIndex);
@@ -844,6 +909,142 @@ export default {
         localStorage.setItem(cacheKey, JSON.stringify(cache));
       } catch (e) {
         console.warn('referDoc 缓存删除失败:', e);
+      }
+    },
+
+    // ===== 消息点赞/点踩与反馈 =====
+    getFeedbackPreset(feedback) {
+      if (!feedback) return { reason: '', detail: '' };
+      const text = String(feedback).trim();
+      const matchedReason = this.feedbackReasonOptions.find(item => {
+        return text === item || text.startsWith(`${item}：`) || text.startsWith(`${item}:`);
+      });
+      if (!matchedReason) return { reason: '', detail: text };
+      const detail = text
+          .replace(`${matchedReason}：`, '')
+          .replace(`${matchedReason}:`, '')
+          .trim();
+      return { reason: matchedReason, detail };
+    },
+
+    buildFeedbackText() {
+      const reason = this.feedbackSelectedReason;
+      const detail = (this.feedbackInput || '').trim();
+      if (reason && reason !== '其他') {
+        return detail ? `${reason}：${detail}` : reason;
+      }
+      if (reason === '其他') {
+        return detail || '其他';
+      }
+      return detail || null;
+    },
+
+    updateMessageEvaluationState(messageId, evaluation, feedback) {
+      const target = this.currentMessagesData.find(item => item.messageId === messageId);
+      if (!target) return;
+      this.$set(target, 'evaluation', evaluation === undefined ? null : evaluation);
+      this.$set(target, 'feedback', feedback === undefined ? null : feedback);
+    },
+
+    async saveMessageEvaluation({ messageId, evaluation, feedback, successMessage = '' }) {
+      if (!messageId) return false;
+      this.$set(this.evaluationLoadingMap, messageId, true);
+      try {
+        const res = await request.put('/chat/message/evaluation', {
+          id: messageId,
+          evaluation,
+          feedback
+        });
+        if (!res || !res.data || res.data.code !== '200') {
+          this.$message.error((res && res.data && res.data.msg) || '评价失败');
+          return false;
+        }
+        this.updateMessageEvaluationState(messageId, evaluation, feedback);
+        if (successMessage) this.$message.success(successMessage);
+        return true;
+      } catch (err) {
+        console.error('[RAG] 消息评价失败:', err);
+        this.$message.error('评价失败，请稍后重试');
+        return false;
+      } finally {
+        this.$set(this.evaluationLoadingMap, messageId, false);
+      }
+    },
+
+    async handleLikeClick(msg) {
+      if (!msg || !msg.messageId || this.evaluationLoadingMap[msg.messageId]) return;
+      const cancelLike = msg.evaluation === 'like';
+      const success = await this.saveMessageEvaluation({
+        messageId: msg.messageId,
+        evaluation: cancelLike ? null : 'like',
+        feedback: null,
+        successMessage: cancelLike ? '已取消评价' : '感谢你的点赞'
+      });
+      if (success && this.feedbackTargetMessageId === msg.messageId) {
+        this.feedbackDialogVisible = false;
+      }
+    },
+
+    async handleDislikeClick(msg) {
+      if (!msg || !msg.messageId || this.evaluationLoadingMap[msg.messageId]) return;
+      const cancelDislike = msg.evaluation === 'dislike';
+      if (cancelDislike) {
+        await this.saveMessageEvaluation({
+          messageId: msg.messageId,
+          evaluation: null,
+          feedback: null,
+          successMessage: '已取消评价'
+        });
+        return;
+      }
+      const success = await this.saveMessageEvaluation({
+        messageId: msg.messageId,
+        evaluation: 'dislike',
+        feedback: msg.feedback || null,
+        successMessage: '已记录你的反馈'
+      });
+      if (success) {
+        this.openFeedbackDialog(msg);
+      }
+    },
+
+    openFeedbackDialog(msg) {
+      if (!msg || !msg.messageId) return;
+      const preset = this.getFeedbackPreset(msg.feedback);
+      this.feedbackTargetMessageId = msg.messageId;
+      this.feedbackSelectedReason = preset.reason;
+      this.feedbackInput = preset.detail;
+      this.feedbackDialogVisible = true;
+    },
+
+    toggleFeedbackReason(reason) {
+      this.feedbackSelectedReason = this.feedbackSelectedReason === reason ? '' : reason;
+    },
+
+    resetFeedbackDialog() {
+      this.feedbackSubmitting = false;
+      this.feedbackTargetMessageId = null;
+      this.feedbackSelectedReason = '';
+      this.feedbackInput = '';
+    },
+
+    async submitDislikeFeedback() {
+      const messageId = this.feedbackTargetMessageId;
+      if (!messageId || this.feedbackSubmitting) return;
+      this.feedbackSubmitting = true;
+      try {
+        const feedbackText = this.buildFeedbackText();
+        const success = await this.saveMessageEvaluation({
+          messageId,
+          evaluation: 'dislike',
+          feedback: feedbackText,
+          successMessage: '反馈已提交，感谢你的建议'
+        });
+        if (success) {
+          this.feedbackDialogVisible = false;
+        }
+      } finally {
+        this.feedbackSubmitting = false;
       }
     }
   }
@@ -1313,10 +1514,8 @@ export default {
   gap: 12px;
   margin-top: 6px;
   padding-left: 4px;
-  opacity: 0;
-  transition: opacity 0.2s;
+  opacity: 1;
 }
-.message-row:hover .message-actions { opacity: 1; }
 .row-user .message-actions {
   justify-content: flex-end;
   padding-left: 0;
@@ -1327,9 +1526,35 @@ export default {
   color: #999;
   font-size: 16px;
   padding: 4px;
-  transition: color 0.2s;
+  border-radius: 4px;
+  transition: color 0.2s, background 0.2s;
 }
-.action-icon:hover { color: #3370ff; }
+.action-icon:hover {
+  color: #3370ff;
+  background: rgba(51, 112, 255, 0.06);
+}
+.action-icon.active {
+  color: #1d4ed8;
+  background: rgba(29, 78, 216, 0.22);
+  box-shadow: inset 0 0 0 1px rgba(29, 78, 216, 0.2);
+}
+.action-icon.disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+.action-icon.thumb-down {
+  transform: scaleY(-1);
+}
+.action-icon.thumb-up.active {
+  color: #047857;
+  background: rgba(4, 120, 87, 0.26);
+  box-shadow: inset 0 0 0 1px rgba(4, 120, 87, 0.26);
+}
+.action-icon.thumb-down.active {
+  color: #b91c1c;
+  background: rgba(185, 28, 28, 0.24);
+  box-shadow: inset 0 0 0 1px rgba(185, 28, 28, 0.24);
+}
 
 
 /* Markdown & Code Styles (Quiet Light) */
@@ -1746,5 +1971,81 @@ export default {
   width: 100%;
   height: 100%;
   border: none;
+}
+
+/* 点踩反馈弹窗 */
+::v-deep .feedback-dialog {
+  border-radius: 16px;
+  overflow: hidden;
+}
+::v-deep .feedback-dialog .el-dialog__header {
+  padding: 18px 22px 10px;
+}
+::v-deep .feedback-dialog .el-dialog__title {
+  font-size: 26px;
+  font-weight: 600;
+  color: #1f2329;
+}
+::v-deep .feedback-dialog .el-dialog__body {
+  padding: 10px 22px 12px;
+}
+::v-deep .feedback-dialog .el-dialog__footer {
+  padding: 10px 22px 22px;
+}
+.feedback-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.feedback-reason-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.feedback-reason-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  padding: 0 14px;
+  font-size: 14px;
+  color: #606266;
+  border: 1px solid #dcdfe6;
+  border-radius: 15px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+.feedback-reason-tag:hover {
+  color: #3370ff;
+  border-color: #3370ff;
+  background: #f5f8ff;
+}
+.feedback-reason-tag.active {
+  color: #3370ff;
+  border-color: #3370ff;
+  background: #edf3ff;
+}
+::v-deep .feedback-textarea .el-textarea__inner {
+  min-height: 156px !important;
+  border-radius: 14px;
+  border-color: #6f84ff;
+  font-size: 16px;
+  line-height: 1.5;
+  color: #4f5665;
+}
+::v-deep .feedback-textarea .el-textarea__inner:focus {
+  border-color: #4c67ff;
+  box-shadow: 0 0 0 2px rgba(76, 103, 255, 0.08);
+}
+::v-deep .feedback-textarea .el-input__count {
+  background: transparent;
+  right: 10px;
+  bottom: 8px;
+}
+::v-deep .feedback-dialog .dialog-footer {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
 }
 </style>

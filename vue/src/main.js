@@ -12,7 +12,21 @@ Vue.config.productionTip = false
 Vue.prototype.$request = request
 Vue.prototype.$baseUrl = process.env.VUE_APP_BASEURL
 
-Vue.use(ElementUI, {size: "small"})
+Vue.use(ElementUI, { size: "small" })
+
+// 全局重载 $message，统一设置默认显示时长（单位：毫秒）
+const DEFAULT_DURATION = 2000
+const _msg = Vue.prototype.$message
+Vue.prototype.$message = function (options) {
+    if (typeof options === 'string') options = { message: options }
+    return _msg({ duration: DEFAULT_DURATION, ...options })
+}
+    ;['success', 'warning', 'info', 'error'].forEach(type => {
+        Vue.prototype.$message[type] = (options) => {
+            if (typeof options === 'string') options = { message: options }
+            return _msg[type]({ duration: DEFAULT_DURATION, ...options })
+        }
+    })
 
 new Vue({
     router,

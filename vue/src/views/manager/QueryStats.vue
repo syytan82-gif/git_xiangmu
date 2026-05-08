@@ -98,6 +98,7 @@
             background
             small
             @current-change="handleCurrentChange"
+            @size-change="handleSizeChange"
             :current-page="pageNum"
             :page-sizes="[10, 20, 30]"
             :page-size="pageSize"
@@ -258,6 +259,10 @@ export default {
     },
     handleCurrentChange(pageNum) {
       this.load(pageNum)
+    },
+    handleSizeChange(size) {
+      this.pageSize = size
+      this.load(1)
     }
   }
 }

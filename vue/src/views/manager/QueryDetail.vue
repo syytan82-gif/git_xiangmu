@@ -42,6 +42,7 @@
           <el-option label="全部" value=""></el-option>
           <el-option label="智能问数" value="DATA"></el-option>
           <el-option label="智能填表" value="FORM"></el-option>
+          <el-option label="智能问答" value="QA"></el-option>
         </el-select>
 
         <el-button type="primary" size="small" class="primary-btn" @click="load(1)">查询</el-button>
@@ -70,7 +71,7 @@
                   </div>
                   <div class="expand-question">{{ scope.row.question }}</div>
                 </div>
-                <div class="expand-section">
+                <div v-if="scope.row.module !== 'QA'" class="expand-section">
                   <div class="expand-label">
                     <i class="el-icon-document"></i> 生成的 SQL
                   </div>
@@ -94,8 +95,11 @@
 
           <el-table-column label="模块" width="110" align="center">
             <template v-slot="scope">
-              <el-tag size="small" :type="scope.row.module === 'DATA' ? '' : 'success'" effect="plain">
-                {{ scope.row.module === 'DATA' ? '智能问数' : '智能填表' }}
+              <el-tag
+                size="small"
+                :type="scope.row.module === 'DATA' ? '' : scope.row.module === 'FORM' ? 'success' : 'warning'"
+                effect="plain">
+                {{ scope.row.module === 'DATA' ? '智能问数' : scope.row.module === 'FORM' ? '智能填表' : '智能问答' }}
               </el-tag>
             </template>
           </el-table-column>
@@ -108,7 +112,8 @@
 
           <el-table-column label="生成的 SQL" min-width="200" show-overflow-tooltip>
             <template v-slot="scope">
-              <span class="sql-preview">{{ truncateSql(scope.row.generatedSql) }}</span>
+              <span v-if="scope.row.module !== 'QA'" class="sql-preview">{{ truncateSql(scope.row.generatedSql) }}</span>
+              <span v-else class="no-sql-tip">—</span>
             </template>
           </el-table-column>
 
@@ -125,6 +130,7 @@
             background
             small
             @current-change="handleCurrentChange"
+            @size-change="handleSizeChange"
             :current-page="pageNum"
             :page-sizes="[10, 20, 30]"
             :page-size="pageSize"
@@ -294,6 +300,10 @@ export default {
     },
     handleCurrentChange(pageNum) {
       this.load(pageNum)
+    },
+    handleSizeChange(size) {
+      this.pageSize = size
+      this.load(1)
     }
   }
 }
@@ -464,6 +474,10 @@ export default {
 /* ===== 行内文本样式 ===== */
 .question-text {
   color: #303133;
+}
+.no-sql-tip {
+  color: #c0c4cc;
+  font-size: 14px;
 }
 .sql-preview {
   font-family: 'Consolas', 'Monaco', 'Courier New', monospace;

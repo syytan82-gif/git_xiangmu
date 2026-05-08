@@ -13,7 +13,9 @@
     "element-ui": "^2.15.14",
     "marked": "^12.0.0",
     "vue": "^2.6.14",
-    "vue-router": "^3.6.5"
+    "vue-grid-layout": "^2.4.0",
+    "vue-router": "^3.6.5",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@babel/plugin-transform-class-properties": "^7.28.6",

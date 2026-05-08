@@ -215,7 +215,21 @@
                   <el-tooltip v-if="msg.role === 1 && msg.messageId && msg.executionResult && msg.executionResult.length > 0" content="导出Excel" placement="top" :open-delay="500">
                     <i class="el-icon-download action-icon" @click="downloadExcel(msg.messageId)"></i>
                   </el-tooltip>
-                  <el-tooltip content="复制全文" placement="top" :open-delay="500">
+                  <el-tooltip v-if="msg.role === 1 && msg.messageId" :content="msg.evaluation === 'like' ? '\u53d6\u6d88\u70b9\u8d5e' : '\u70b9\u8d5e'" placement="top" :open-delay="500">
+                    <i
+                        class="el-icon-thumb action-icon thumb-up"
+                        :class="{ active: msg.evaluation === 'like', disabled: !!evaluationLoadingMap[msg.messageId] }"
+                        @click="handleLikeClick(msg)"
+                    ></i>
+                  </el-tooltip>
+                  <el-tooltip v-if="msg.role === 1 && msg.messageId" :content="msg.evaluation === 'dislike' ? '\u53d6\u6d88\u70b9\u8e29' : '\u70b9\u8e29'" placement="top" :open-delay="500">
+                    <i
+                        class="el-icon-thumb action-icon thumb-down"
+                        :class="{ active: msg.evaluation === 'dislike', disabled: !!evaluationLoadingMap[msg.messageId] }"
+                        @click="handleDislikeClick(msg)"
+                    ></i>
+                  </el-tooltip>
+                  <el-tooltip :content="'\u590d\u5236\u5168\u6587'" placement="top" :open-delay="500">
                     <i class="el-icon-document-copy action-icon" @click="copyContent(msg.content)"></i>
                   </el-tooltip>
                 </div>
@@ -313,6 +327,43 @@
       </div>
     </div>
 
+    <el-dialog
+        :title="'\u53cd\u9988'"
+        :visible.sync="feedbackDialogVisible"
+        width="520px"
+        custom-class="feedback-dialog"
+        :close-on-click-modal="false"
+        @close="resetFeedbackDialog"
+    >
+      <div class="feedback-dialog-body">
+        <div class="feedback-reason-list">
+          <span
+              v-for="reason in feedbackReasonOptions"
+              :key="reason"
+              class="feedback-reason-tag"
+              :class="{ active: feedbackSelectedReason === reason }"
+              @click="toggleFeedbackReason(reason)"
+          >
+            {{ reason }}
+          </span>
+        </div>
+        <el-input
+            v-model="feedbackInput"
+            type="textarea"
+            :rows="5"
+            resize="none"
+            maxlength="500"
+            show-word-limit
+            class="feedback-textarea"
+            :placeholder="'\u6211\u4eec\u60f3\u77e5\u9053\u4f60\u5bf9\u6b64\u6b21\u56de\u7b54\u4e0d\u6ee1\u610f\u7684\u539f\u56e0\uff0c\u4f60\u8ba4\u4e3a\u66f4\u597d\u7684\u56de\u7b54\u662f\u4ec0\u4e48\uff1f'"
+        ></el-input>
+      </div>
+      <span slot="footer" class="dialog-footer">
+        <el-button @click="feedbackDialogVisible = false">{{ '\u53d6\u6d88' }}</el-button>
+        <el-button type="primary" :loading="feedbackSubmitting" @click="submitDislikeFeedback">{{ '\u63d0\u4ea4' }}</el-button>
+      </span>
+    </el-dialog>
+
 
   </div>
 </template>
@@ -404,6 +455,13 @@ export default {
       faqRefreshLoading: false,
       faqRecommendLoaded: false,
       faqPendingClickId: null,
+      evaluationLoadingMap: {},
+      feedbackDialogVisible: false,
+      feedbackSubmitting: false,
+      feedbackTargetMessageId: null,
+      feedbackSelectedReason: '',
+      feedbackInput: '',
+      feedbackReasonOptions: ['SQL\u4e0d\u51c6\u786e', '\u7ed3\u679c\u4e0d\u5b8c\u6574', '\u89e3\u91ca\u4e0d\u6e05\u695a', '\u6267\u884c\u62a5\u9519', '\u54cd\u5e94\u592a\u6162', '\u5176\u4ed6'],
     };
   },
   computed: {
@@ -712,6 +770,8 @@ export default {
                 content: msgContent,
                 displayedContent: msgContent,
                 messageId: item.id,
+                evaluation: item.evaluation || null,
+                feedback: item.feedback || null,
                 generatedSql: generatedSql,
                 executionResult: executionResult,
                 displayedData: [],
@@ -943,6 +1003,8 @@ export default {
               executionResult: executionResult,
               generatedSql: generatedSql,
               messageId: msg.id,
+              evaluation: msg.evaluation || null,
+              feedback: msg.feedback || null,
               displayedData: [],
               page: 0,
               pageSize: 50
@@ -1150,6 +1212,135 @@ export default {
           this.$message.error('复制失败');
         }
         document.body.removeChild(textarea);
+      }
+    },
+
+    // ===== Message evaluation and feedback =====
+    getFeedbackPreset(feedback) {
+      if (!feedback) return { reason: '', detail: '' };
+      const text = String(feedback).trim();
+      const matchedReason = this.feedbackReasonOptions.find(item => text === item || text.startsWith(`${item}:`));
+      if (!matchedReason) return { reason: '', detail: text };
+      const detail = text.replace(`${matchedReason}:`, '').trim();
+      return { reason: matchedReason, detail };
+    },
+
+    buildFeedbackText() {
+      const reason = this.feedbackSelectedReason;
+      const detail = (this.feedbackInput || '').trim();
+      const otherReason = this.feedbackReasonOptions[this.feedbackReasonOptions.length - 1];
+
+      if (reason && reason !== otherReason) return detail ? `${reason}:${detail}` : reason;
+      if (reason === otherReason) return detail || otherReason;
+      return detail || null;
+    },
+
+    updateMessageEvaluationState(messageId, evaluation, feedback) {
+      const target = this.currentMessagesData.find(item => item.messageId === messageId);
+      if (!target) return;
+      this.$set(target, 'evaluation', evaluation === undefined ? null : evaluation);
+      this.$set(target, 'feedback', feedback === undefined ? null : feedback);
+    },
+
+    async saveMessageEvaluation({ messageId, evaluation, feedback, successMessage = '' }) {
+      if (!messageId) return false;
+      this.$set(this.evaluationLoadingMap, messageId, true);
+      try {
+        const res = await request.put('/chat/message/evaluation', {
+          id: messageId,
+          evaluation,
+          feedback
+        });
+
+        if (!res || !res.data || res.data.code !== '200') {
+          this.$message.error((res && res.data && res.data.msg) || '\u8bc4\u4ef7\u63d0\u4ea4\u5931\u8d25');
+          return false;
+        }
+
+        this.updateMessageEvaluationState(messageId, evaluation, feedback);
+        if (successMessage) this.$message.success(successMessage);
+        return true;
+      } catch (err) {
+        console.error('[Former] message evaluation failed:', err);
+        this.$message.error('\u8bc4\u4ef7\u63d0\u4ea4\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5');
+        return false;
+      } finally {
+        this.$set(this.evaluationLoadingMap, messageId, false);
+      }
+    },
+
+    async handleLikeClick(msg) {
+      if (!msg || !msg.messageId || this.evaluationLoadingMap[msg.messageId]) return;
+      const cancelLike = msg.evaluation === 'like';
+      const success = await this.saveMessageEvaluation({
+        messageId: msg.messageId,
+        evaluation: cancelLike ? null : 'like',
+        feedback: null,
+        successMessage: cancelLike ? '\u5df2\u53d6\u6d88\u8bc4\u4ef7' : '\u611f\u8c22\u4f60\u7684\u70b9\u8d5e'
+      });
+      if (success && this.feedbackTargetMessageId === msg.messageId) {
+        this.feedbackDialogVisible = false;
+      }
+    },
+
+    async handleDislikeClick(msg) {
+      if (!msg || !msg.messageId || this.evaluationLoadingMap[msg.messageId]) return;
+      const cancelDislike = msg.evaluation === 'dislike';
+      if (cancelDislike) {
+        await this.saveMessageEvaluation({
+          messageId: msg.messageId,
+          evaluation: null,
+          feedback: null,
+          successMessage: '\u5df2\u53d6\u6d88\u8bc4\u4ef7'
+        });
+        return;
+      }
+
+      const success = await this.saveMessageEvaluation({
+        messageId: msg.messageId,
+        evaluation: 'dislike',
+        feedback: msg.feedback || null,
+        successMessage: '\u5df2\u8bb0\u5f55\u70b9\u8e29'
+      });
+      if (success) this.openFeedbackDialog(msg);
+    },
+
+    openFeedbackDialog(msg) {
+      if (!msg || !msg.messageId) return;
+      const preset = this.getFeedbackPreset(msg.feedback);
+      this.feedbackTargetMessageId = msg.messageId;
+      this.feedbackSelectedReason = preset.reason;
+      this.feedbackInput = preset.detail;
+      this.feedbackDialogVisible = true;
+    },
+
+    toggleFeedbackReason(reason) {
+      this.feedbackSelectedReason = this.feedbackSelectedReason === reason ? '' : reason;
+    },
+
+    resetFeedbackDialog() {
+      this.feedbackSubmitting = false;
+      this.feedbackTargetMessageId = null;
+      this.feedbackSelectedReason = '';
+      this.feedbackInput = '';
+    },
+
+    async submitDislikeFeedback() {
+      const messageId = this.feedbackTargetMessageId;
+      if (!messageId || this.feedbackSubmitting) return;
+
+      this.feedbackSubmitting = true;
+      try {
+        const feedbackText = this.buildFeedbackText();
+        const success = await this.saveMessageEvaluation({
+          messageId,
+          evaluation: 'dislike',
+          feedback: feedbackText,
+          successMessage: '\u53cd\u9988\u5df2\u63d0\u4ea4\uff0c\u611f\u8c22\u4f60\u7684\u5efa\u8bae'
+        });
+        if (success) this.feedbackDialogVisible = false;
+      } finally {
+        this.feedbackSubmitting = false;
       }
     },
 
@@ -1501,6 +1692,8 @@ export default {
             executionResult: executionResult,
             generatedSql: generatedSql,
             messageId: newMsg.id,
+            evaluation: newMsg.evaluation || null,
+            feedback: newMsg.feedback || null,
             displayedData: [],
             page: 0,
             pageSize: 50
@@ -1927,10 +2120,8 @@ export default {
   gap: 12px;
   margin-top: 6px;
   padding-left: 4px;
-  opacity: 0;
-  transition: opacity 0.2s;
+  opacity: 1;
 }
-.message-row:hover .message-actions { opacity: 1; }
 .action-icon {
   cursor: pointer;
   color: #999;
@@ -2066,10 +2257,6 @@ export default {
   gap: 4px;
   margin-top: 6px;
   padding-left: 2px;
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-.message-row:hover .message-actions {
   opacity: 1;
 }
 .row-user .message-actions {
@@ -2757,5 +2944,105 @@ export default {
   overflow: hidden;
 }
 .faq-expand-enter, .faq-expand-leave-to { opacity: 0; max-height: 0; }
+
+
+
+.action-icon.active {
+  color: #1d4ed8;
+  background: rgba(29, 78, 216, 0.22);
+  box-shadow: inset 0 0 0 1px rgba(29, 78, 216, 0.2);
+}
+.action-icon.disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+.action-icon.thumb-down {
+  transform: scaleY(-1);
+}
+.action-icon.thumb-up.active {
+  color: #047857;
+  background: rgba(4, 120, 87, 0.26);
+  box-shadow: inset 0 0 0 1px rgba(4, 120, 87, 0.26);
+}
+.action-icon.thumb-down.active {
+  color: #b91c1c;
+  background: rgba(185, 28, 28, 0.24);
+  box-shadow: inset 0 0 0 1px rgba(185, 28, 28, 0.24);
+}
+
+::v-deep .feedback-dialog {
+  border-radius: 16px;
+  overflow: hidden;
+}
+::v-deep .feedback-dialog .el-dialog__header {
+  padding: 18px 22px 10px;
+}
+::v-deep .feedback-dialog .el-dialog__title {
+  font-size: 26px;
+  font-weight: 600;
+  color: #1f2329;
+}
+::v-deep .feedback-dialog .el-dialog__body {
+  padding: 10px 22px 12px;
+}
+::v-deep .feedback-dialog .el-dialog__footer {
+  padding: 10px 22px 22px;
+}
+.feedback-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.feedback-reason-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.feedback-reason-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  padding: 0 14px;
+  font-size: 14px;
+  color: #606266;
+  border: 1px solid #dcdfe6;
+  border-radius: 15px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+.feedback-reason-tag:hover {
+  color: #3370ff;
+  border-color: #3370ff;
+  background: #f5f8ff;
+}
+.feedback-reason-tag.active {
+  color: #3370ff;
+  border-color: #3370ff;
+  background: #edf3ff;
+}
+::v-deep .feedback-textarea .el-textarea__inner {
+  min-height: 156px !important;
+  border-radius: 14px;
+  border-color: #6f84ff;
+  font-size: 16px;
+  line-height: 1.5;
+  color: #4f5665;
+}
+::v-deep .feedback-textarea .el-textarea__inner:focus {
+  border-color: #4c67ff;
+  box-shadow: 0 0 0 2px rgba(76, 103, 255, 0.08);
+}
+::v-deep .feedback-textarea .el-input__count {
+  background: transparent;
+  right: 10px;
+  bottom: 8px;
+}
+::v-deep .feedback-dialog .dialog-footer {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
 
 </style>

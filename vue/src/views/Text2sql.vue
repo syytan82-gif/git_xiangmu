@@ -254,6 +254,20 @@
                   <el-tooltip v-if="msg.role === 1 && msg.messageId && msg.chartData && msg.chartData.data && msg.chartData.data.length > 0" content="下载 Excel" placement="top" :open-delay="500">
                     <i class="el-icon-download action-icon" @click="downloadExcel(msg.messageId)"></i>
                   </el-tooltip>
+                  <el-tooltip v-if="msg.role === 1 && msg.messageId" :content="msg.evaluation === 'like' ? '取消点赞' : '点赞'" placement="top" :open-delay="500">
+                    <i
+                        class="el-icon-thumb action-icon thumb-up"
+                        :class="{ active: msg.evaluation === 'like', disabled: !!evaluationLoadingMap[msg.messageId] }"
+                        @click="handleLikeClick(msg)"
+                    ></i>
+                  </el-tooltip>
+                  <el-tooltip v-if="msg.role === 1 && msg.messageId" :content="msg.evaluation === 'dislike' ? '取消点踩' : '点踩'" placement="top" :open-delay="500">
+                    <i
+                        class="el-icon-thumb action-icon thumb-down"
+                        :class="{ active: msg.evaluation === 'dislike', disabled: !!evaluationLoadingMap[msg.messageId] }"
+                        @click="handleDislikeClick(msg)"
+                    ></i>
+                  </el-tooltip>
                   <el-tooltip content="复制全文" placement="top" :open-delay="500">
                     <i class="el-icon-document-copy action-icon" @click="copyContent(msg.content)"></i>
                   </el-tooltip>
@@ -339,12 +353,12 @@
             <div class="input-actions">
               <button
                   class="send-icon-btn"
-                  :disabled="!userInput.trim() || loading"
-                  @click="handleSend"
+                  :disabled="!userInput.trim() && !loading"
+                  @click="loading ? handleStop() : handleSend()"
               >
                 <i v-if="!loading" class="el-icon-s-promotion"></i>
                 <div v-else class="stop-btn-inner">
-                  <i class="el-icon-video-pause" @click.stop="handleStop"></i>
+                  <i class="el-icon-video-pause"></i>
                 </div>
               </button>
             </div>
@@ -353,6 +367,42 @@
       </div>
     </div>
 
+    <el-dialog
+        title="反馈"
+        :visible.sync="feedbackDialogVisible"
+        width="520px"
+        custom-class="feedback-dialog"
+        :close-on-click-modal="false"
+        @close="resetFeedbackDialog"
+    >
+      <div class="feedback-dialog-body">
+        <div class="feedback-reason-list">
+          <span
+              v-for="reason in feedbackReasonOptions"
+              :key="reason"
+              class="feedback-reason-tag"
+              :class="{ active: feedbackSelectedReason === reason }"
+              @click="toggleFeedbackReason(reason)"
+          >
+            {{ reason }}
+          </span>
+        </div>
+        <el-input
+            v-model="feedbackInput"
+            type="textarea"
+            :rows="5"
+            resize="none"
+            maxlength="500"
+            show-word-limit
+            class="feedback-textarea"
+            placeholder="我们想知道你对此次回答不满意的原因，你认为更好的回答是什么？"
+        ></el-input>
+      </div>
+      <span slot="footer" class="dialog-footer">
+        <el-button @click="feedbackDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="feedbackSubmitting" @click="submitDislikeFeedback">提交</el-button>
+      </span>
+    </el-dialog>
 
   </div>
 </template>
@@ -456,6 +506,13 @@ export default {
       faqRefreshLoading: false,      // 换一批 loading
       faqRecommendLoaded: false,     // 是否已成功加载过 recommend 数据
       faqPendingClickId: null,       // 用户点击的问题 ID，发送时上报热度
+      evaluationLoadingMap: {},      // { [messageId]: boolean } 点赞/点踩接口状态
+      feedbackDialogVisible: false,  // 点踩反馈弹窗
+      feedbackSubmitting: false,     // 反馈提交 loading
+      feedbackTargetMessageId: null, // 当前反馈对应的消息 ID
+      feedbackSelectedReason: '',    // 已选反馈标签
+      feedbackInput: '',             // 反馈输入内容
+      feedbackReasonOptions: ['SQL不准确', '结果不完整', '解释不清楚', '执行报错', '响应太慢', '其他']
     };
   },
   computed: {
@@ -816,7 +873,9 @@ export default {
               generatedSql: generatedSql,
               chartData: chartData,
               sqlError: sqlErrorHist || null, // SQL 执行错误信息
-              messageId: msg.id
+              messageId: msg.id,
+              evaluation: msg.evaluation || null,
+              feedback: msg.feedback || null
             };
           });
 
@@ -904,7 +963,7 @@ export default {
 
       // 初始化该 Session 对应的独立状态
       if (!this.sessionStates[sessionId]) {
-        this.$set(this.sessionStates, sessionId, { loading: false, loadingSeconds: 0, loadingTimer: null, abortController: null, userMsg: null });
+        this.$set(this.sessionStates, sessionId, { loading: false, loadingSeconds: 0, loadingTimer: null, abortController: null, userMsg: null, currentTaskId: null });
       }
 
       const state = this.sessionStates[sessionId];
@@ -930,13 +989,18 @@ export default {
       }, 1000);
 
       try {
+        // 生成前端 taskId（UUID），无论新旧会话都可用此 ID 取消
+        const taskId = this.generateUUID();
+        state.currentTaskId = taskId;
+
         // 调用新的 /chat/send API
         console.log('[Text2sql] 调用 /chat/send API...');
         const sendRes = await request.post('/chat/send', {
           sessionId: isTemp ? null : sessionId,
           module: 'DATA',
           content: content,
-          dbConfigId: this.selectedDatasourceId
+          dbConfigId: this.selectedDatasourceId,
+          taskId: taskId
         }, {
           signal: state.abortController.signal
         });
@@ -1055,7 +1119,9 @@ export default {
             generatedSql: generatedSql || null,
             chartData: chartData,
             sqlError: sqlError || null, // SQL 执行错误信息
-            messageId: msgData.id
+            messageId: msgData.id,
+            evaluation: msgData.evaluation || null,
+            feedback: msgData.feedback || null
           });
 
           this.typewriterEffect(aiReplyContent, newMsgIndex);
@@ -1118,9 +1184,13 @@ export default {
 
 
     handleStop() {
+      console.log('[Text2sql] handleStop 被调用, currentChatId:', this.currentChatId);
       // 动作 1: 前端立即断开专属连接 (UI 立即停止 Loading 动画)
       const thisState = this.sessionStates[this.currentChatId];
-      if (!thisState || !thisState.loading) return;
+      if (!thisState || !thisState.loading) {
+        console.warn('[Text2sql] handleStop 提前退出: thisState=', thisState, 'loading=', thisState?.loading);
+        return;
+      }
 
       if (thisState.abortController) {
         thisState.abortController.abort();
@@ -1132,12 +1202,16 @@ export default {
       thisState.loadingTimer = null;
 
       // 动作 2: 通知后端释放资源 (Fire-and-forget)
-      const sessionIdToCancel = this.currentChatId.startsWith('temp_') ? null : this.currentChatId;
+      // 优先用 taskId（新对话在等待响应期间 sessionId 未知），旧对话两者都有
+      const sessionIdToCancel = String(this.currentChatId).startsWith('temp_') ? null : this.currentChatId;
+      const taskIdToCancel = thisState.currentTaskId || null;
+      console.log('[Text2sql] handleStop sessionIdToCancel:', sessionIdToCancel, 'taskId:', taskIdToCancel);
 
-      if (sessionIdToCancel) {
-        console.log('[Text2sql] 发送任务取消请求，sessionId:', sessionIdToCancel);
+      if (sessionIdToCancel || taskIdToCancel) {
+        console.log('[Text2sql] 发送任务取消请求');
         request.post('/chat/cancel', {
-          sessionId: sessionIdToCancel
+          sessionId: sessionIdToCancel,
+          taskId: taskIdToCancel
         }).then(res => {
           if (res.data && res.data.code === '200') {
             console.log('[Text2sql] 任务取消成功');
@@ -1147,8 +1221,10 @@ export default {
         }).catch(err => {
           console.warn('[Text2sql] 后端取消指令发送失败:', err);
         });
+        // 清除 taskId，避免重复使用
+        thisState.currentTaskId = null;
       } else {
-        console.warn('[Text2sql] 无法取消任务: sessionId 不存在');
+        console.warn('[Text2sql] 无法取消任务: sessionId 和 taskId 均不存在');
       }
 
       // 清除临时会话ID
@@ -1455,6 +1531,153 @@ export default {
       }
     },
 
+    // ===== 消息点赞/点踩与反馈 =====
+    getFeedbackPreset(feedback) {
+      if (!feedback) return { reason: '', detail: '' };
+      const text = String(feedback).trim();
+      const matchedReason = this.feedbackReasonOptions.find(item => {
+        return text === item || text.startsWith(`${item}：`) || text.startsWith(`${item}:`);
+      });
+      if (!matchedReason) return { reason: '', detail: text };
+
+      const detail = text
+          .replace(`${matchedReason}：`, '')
+          .replace(`${matchedReason}:`, '')
+          .trim();
+      return { reason: matchedReason, detail };
+    },
+
+    buildFeedbackText() {
+      const reason = this.feedbackSelectedReason;
+      const detail = (this.feedbackInput || '').trim();
+
+      if (reason && reason !== '其他') {
+        return detail ? `${reason}：${detail}` : reason;
+      }
+      if (reason === '其他') {
+        return detail || '其他';
+      }
+      return detail || null;
+    },
+
+    updateMessageEvaluationState(messageId, evaluation, feedback) {
+      const target = this.currentMessagesData.find(item => item.messageId === messageId);
+      if (!target) return;
+      this.$set(target, 'evaluation', evaluation === undefined ? null : evaluation);
+      this.$set(target, 'feedback', feedback === undefined ? null : feedback);
+    },
+
+    async saveMessageEvaluation({ messageId, evaluation, feedback, successMessage = '' }) {
+      if (!messageId) return false;
+
+      this.$set(this.evaluationLoadingMap, messageId, true);
+      try {
+        const res = await request.put('/chat/message/evaluation', {
+          id: messageId,
+          evaluation,
+          feedback
+        });
+
+        if (!res || !res.data || res.data.code !== '200') {
+          this.$message.error((res && res.data && res.data.msg) || '评价失败');
+          return false;
+        }
+
+        this.updateMessageEvaluationState(messageId, evaluation, feedback);
+        if (successMessage) this.$message.success(successMessage);
+        return true;
+      } catch (err) {
+        console.error('[Text2sql] 消息评价失败:', err);
+        this.$message.error('评价失败，请稍后重试');
+        return false;
+      } finally {
+        this.$set(this.evaluationLoadingMap, messageId, false);
+      }
+    },
+
+    async handleLikeClick(msg) {
+      if (!msg || !msg.messageId || this.evaluationLoadingMap[msg.messageId]) return;
+      const cancelLike = msg.evaluation === 'like';
+
+      const success = await this.saveMessageEvaluation({
+        messageId: msg.messageId,
+        evaluation: cancelLike ? null : 'like',
+        feedback: null,
+        successMessage: cancelLike ? '已取消评价' : '感谢你的点赞'
+      });
+
+      if (success && this.feedbackTargetMessageId === msg.messageId) {
+        this.feedbackDialogVisible = false;
+      }
+    },
+
+    async handleDislikeClick(msg) {
+      if (!msg || !msg.messageId || this.evaluationLoadingMap[msg.messageId]) return;
+
+      const cancelDislike = msg.evaluation === 'dislike';
+      if (cancelDislike) {
+        await this.saveMessageEvaluation({
+          messageId: msg.messageId,
+          evaluation: null,
+          feedback: null,
+          successMessage: '已取消评价'
+        });
+        return;
+      }
+
+      const success = await this.saveMessageEvaluation({
+        messageId: msg.messageId,
+        evaluation: 'dislike',
+        feedback: msg.feedback || null,
+        successMessage: '已记录你的反馈'
+      });
+
+      if (success) {
+        this.openFeedbackDialog(msg);
+      }
+    },
+
+    openFeedbackDialog(msg) {
+      if (!msg || !msg.messageId) return;
+      const preset = this.getFeedbackPreset(msg.feedback);
+      this.feedbackTargetMessageId = msg.messageId;
+      this.feedbackSelectedReason = preset.reason;
+      this.feedbackInput = preset.detail;
+      this.feedbackDialogVisible = true;
+    },
+
+    toggleFeedbackReason(reason) {
+      this.feedbackSelectedReason = this.feedbackSelectedReason === reason ? '' : reason;
+    },
+
+    resetFeedbackDialog() {
+      this.feedbackSubmitting = false;
+      this.feedbackTargetMessageId = null;
+      this.feedbackSelectedReason = '';
+      this.feedbackInput = '';
+    },
+
+    async submitDislikeFeedback() {
+      const messageId = this.feedbackTargetMessageId;
+      if (!messageId || this.feedbackSubmitting) return;
+
+      this.feedbackSubmitting = true;
+      try {
+        const feedbackText = this.buildFeedbackText();
+        const success = await this.saveMessageEvaluation({
+          messageId,
+          evaluation: 'dislike',
+          feedback: feedbackText,
+          successMessage: '反馈已提交，感谢你的建议'
+        });
+        if (success) {
+          this.feedbackDialogVisible = false;
+        }
+      } finally {
+        this.feedbackSubmitting = false;
+      }
+    },
+
     handleGlobalClick(e) {
       let target = e.target;
 
@@ -1592,9 +1815,31 @@ export default {
       }, interval);
     },
 
+    // 生成 UUID (v4)
+    generateUUID() {
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+      });
+    },
+
     // 重新回答：调用后端 /chat/regenerate 接口
     regenerateAnswer(msg) {
-      if (this.loading || !msg.messageId) return;
+      if (this.loading) return;
+
+      // 被暂停的消息没有 messageId，改为把最近的用户消息内容填回输入框
+      if (!msg.messageId) {
+        const lastUserMsg = [...this.currentMessagesData].reverse().find(m => m.role === 0);
+        if (lastUserMsg && lastUserMsg.content) {
+          this.userInput = lastUserMsg.content;
+          this.$nextTick(() => {
+            this.resizeTextarea();
+            if (this.$refs.inputRef) this.$refs.inputRef.focus();
+          });
+        }
+        return;
+      }
 
       const sessionId = this.currentChatId;
       if (!this.sessionStates[sessionId]) {
@@ -1662,7 +1907,9 @@ export default {
             generatedSql: generatedSql || null,
             chartData: chartData,
             sqlError: sqlError || null,
-            messageId: newMsg.id
+            messageId: newMsg.id,
+            evaluation: newMsg.evaluation || null,
+            feedback: newMsg.feedback || null
           });
           this.typewriterEffect(aiReplyContent, newMsgIndex);
         } else {
@@ -2103,10 +2350,6 @@ export default {
   gap: 4px;
   margin-top: 6px;
   padding-left: 2px;
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-.message-row:hover .message-actions {
   opacity: 1;
 }
 .row-user .message-actions {
@@ -2125,6 +2368,28 @@ export default {
 .action-icon:hover {
   color: #3370ff;
   background: rgba(51, 112, 255, 0.06);
+}
+.action-icon.active {
+  color: #1d4ed8;
+  background: rgba(29, 78, 216, 0.22);
+  box-shadow: inset 0 0 0 1px rgba(29, 78, 216, 0.2);
+}
+.action-icon.disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+.action-icon.thumb-down {
+  transform: scaleY(-1);
+}
+.action-icon.thumb-up.active {
+  color: #047857;
+  background: rgba(4, 120, 87, 0.26);
+  box-shadow: inset 0 0 0 1px rgba(4, 120, 87, 0.26);
+}
+.action-icon.thumb-down.active {
+  color: #b91c1c;
+  background: rgba(185, 28, 28, 0.24);
+  box-shadow: inset 0 0 0 1px rgba(185, 28, 28, 0.24);
 }
 
 /* Markdown */
@@ -3056,5 +3321,81 @@ export default {
   overflow: hidden;
 }
 .faq-expand-enter, .faq-expand-leave-to { opacity: 0; max-height: 0; }
+
+/* 点踩反馈弹窗 */
+::v-deep .feedback-dialog {
+  border-radius: 16px;
+  overflow: hidden;
+}
+::v-deep .feedback-dialog .el-dialog__header {
+  padding: 18px 22px 10px;
+}
+::v-deep .feedback-dialog .el-dialog__title {
+  font-size: 26px;
+  font-weight: 600;
+  color: #1f2329;
+}
+::v-deep .feedback-dialog .el-dialog__body {
+  padding: 10px 22px 12px;
+}
+::v-deep .feedback-dialog .el-dialog__footer {
+  padding: 10px 22px 22px;
+}
+.feedback-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.feedback-reason-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.feedback-reason-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  padding: 0 14px;
+  font-size: 14px;
+  color: #606266;
+  border: 1px solid #dcdfe6;
+  border-radius: 15px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+.feedback-reason-tag:hover {
+  color: #3370ff;
+  border-color: #3370ff;
+  background: #f5f8ff;
+}
+.feedback-reason-tag.active {
+  color: #3370ff;
+  border-color: #3370ff;
+  background: #edf3ff;
+}
+::v-deep .feedback-textarea .el-textarea__inner {
+  min-height: 156px !important;
+  border-radius: 14px;
+  border-color: #6f84ff;
+  font-size: 16px;
+  line-height: 1.5;
+  color: #4f5665;
+}
+::v-deep .feedback-textarea .el-textarea__inner:focus {
+  border-color: #4c67ff;
+  box-shadow: 0 0 0 2px rgba(76, 103, 255, 0.08);
+}
+::v-deep .feedback-textarea .el-input__count {
+  background: transparent;
+  right: 10px;
+  bottom: 8px;
+}
+::v-deep .feedback-dialog .dialog-footer {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
 
 </style>

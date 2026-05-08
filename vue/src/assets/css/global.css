@@ -38,3 +38,70 @@ html, body {
 #app {
     height: 100%;
 }
+
+/* ===== 操作手册 Popover 下拉菜单（挂在 body 层，需全局样式） ===== */
+.manual-popover.el-popover {
+    padding: 6px 0;
+    min-width: 140px;
+    border-radius: 10px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+    border: 1px solid #e4e7ed;
+}
+.manual-menu {
+    display: flex;
+    flex-direction: column;
+}
+.manual-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 18px;
+    font-size: 14px;
+    font-weight: 500;
+    color: #303133;
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+.manual-item:hover {
+    background-color: #f0f6ff;
+    color: #1890ff;
+}
+.manual-item i {
+    font-size: 15px;
+    color: inherit;
+}
+
+/* Popover 内分割线 */
+.manual-divider {
+    height: 1px;
+    background-color: #f0f2f5;
+    margin: 4px 0;
+}
+/* 上传区域小标题 */
+.manual-section-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: #c0c4cc;
+    padding: 4px 18px 2px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+/* 上传 item：用蓝色调区分 */
+.manual-item-upload {
+    color: #409EFF;
+}
+.manual-item-upload:hover {
+    background-color: #ecf5ff;
+    color: #1890ff;
+}
+/* 上传中：灰色禁用态 */
+.manual-item-upload.is-loading {
+    color: #c0c4cc;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+/* ===== 操作手册 PDF 弹窗全局尺寸修正 ===== */
+.manual-pdf-dialog .el-dialog__body {
+    padding: 0 !important;
+}

@@ -27,7 +27,7 @@
             <span>首页</span>
           </el-menu-item>
 
-          <el-menu-item index="/dashboard" v-if="user.role !== 'USER'">
+          <el-menu-item index="/dashboard" v-if="user.role !== 'USER' && user.id === 6">
             <i class="el-icon-data-line"></i>
             <span>数据大屏</span>
           </el-menu-item>
@@ -38,6 +38,50 @@
           </el-menu-item>
 
         </el-menu>
+
+        <!-- 操作手册按钮（所有用户可见） -->
+        <div class="manual-btn-wrap">
+          <el-popover
+              v-model="manualPopoverVisible"
+              placement="bottom-start"
+              trigger="click"
+              popper-class="manual-popover"
+              :visible-arrow="false"
+          >
+            <div class="manual-menu">
+              <div class="manual-item" @click="openManual('user')">
+                <i class="el-icon-user"></i> 用户手册
+              </div>
+              <div class="manual-item" @click="openManual('admin')">
+                <i class="el-icon-s-custom"></i> 管理员手册
+              </div>
+              <!-- 上传区域：仅管理员可见 -->
+              <template v-if="user.role !== 'USER'">
+                <div class="manual-divider"></div>
+                <div class="manual-section-label">上传替换</div>
+                <div class="manual-item manual-item-upload" @click="triggerUpload('user')" :class="{ 'is-loading': manualUploading && manualUploadType === 'user' }">
+                  <i class="el-icon-upload2"></i> 上传用户手册
+                </div>
+                <div class="manual-item manual-item-upload" @click="triggerUpload('admin')" :class="{ 'is-loading': manualUploading && manualUploadType === 'admin' }">
+                  <i class="el-icon-upload2"></i> 上传管理员手册
+                </div>
+              </template>
+            </div>
+            <!-- 隐藏的文件选择器 -->
+            <input
+                ref="manualFileInput"
+                type="file"
+                accept=".pdf"
+                style="display: none;"
+                @change="handleManualUpload"
+            >
+            <div slot="reference" class="manual-trigger-btn">
+              <i class="el-icon-notebook-2"></i>
+              <span>操作手册</span>
+              <i class="el-icon-arrow-down manual-arrow" :class="{ 'is-open': manualPopoverVisible }"></i>
+            </div>
+          </el-popover>
+        </div>
       </div>
 
       <!-- 右侧用户信息区域 -->
@@ -75,11 +119,47 @@
     <div class="manager-main-right">
       <router-view @update:user="updateUser" />
     </div>
+
+    <!-- PDF 预览弹窗（操作手册） -->
+    <el-dialog
+        :title="manualPdfTitle"
+        :visible.sync="manualPdfVisible"
+        width="82%"
+        top="5vh"
+        custom-class="manual-pdf-dialog"
+        :close-on-click-modal="true"
+        :destroy-on-close="true"
+        @close="closeManualPdf"
+    >
+      <div class="manual-pdf-body" v-loading="manualPdfLoading" element-loading-text="正在加载文档...">
+        <iframe
+            v-if="manualPdfUrl"
+            :src="manualPdfUrl"
+            class="manual-pdf-iframe"
+            frameborder="0"
+        ></iframe>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
 <script>
+import axios from 'axios';
 import ProxyImage from '@/components/ProxyImage.vue';
+
+// 专用于下载手册 PDF 的 axios 实例（需要 token，但 response 不解包，保留原始 blob）
+const manualRequest = axios.create({
+  baseURL: process.env.VUE_APP_BASEURL,
+  timeout: 60000
+});
+manualRequest.interceptors.request.use(config => {
+  const userJson = localStorage.getItem('xm-user');
+  if (userJson) {
+    const user = JSON.parse(userJson);
+    if (user.token) config.headers['token'] = user.token;
+  }
+  return config;
+});
 
 export default {
   name: "Manager",
@@ -89,6 +169,15 @@ export default {
   data() {
     return {
       user: JSON.parse(localStorage.getItem('xm-user') || '{}'),
+      // 操作手册
+      manualPopoverVisible: false,
+      manualPdfVisible: false,
+      manualPdfTitle: '',
+      manualPdfUrl: '',
+      manualPdfLoading: false,
+      // 手册上传
+      manualUploadType: '',
+      manualUploading: false,
     }
   },
   computed: {
@@ -151,12 +240,130 @@ export default {
     // ✅ 直接定义handleMenuSelect，取消嵌套
     handleMenuSelect(index) {
       this.$router.push(index)
+    },
+
+    // ===== 操作手册 =====
+    openManual(type) {
+      this.manualPopoverVisible = false;
+      if (type === 'user') {
+        this.manualPdfTitle = '用户手册';
+      } else {
+        this.manualPdfTitle = '管理员手册';
+      }
+      this.manualPdfVisible = true;
+      this.manualPdfLoading = true;
+      // 释放上一次的 blob URL
+      if (this.manualPdfUrl) {
+        URL.revokeObjectURL(this.manualPdfUrl);
+        this.manualPdfUrl = '';
+      }
+      manualRequest.get('/file/manual/preview', {
+        params: { type },
+        responseType: 'blob'
+      }).then(res => {
+        const blob = new Blob([res.data], { type: 'application/pdf' });
+        this.manualPdfUrl = URL.createObjectURL(blob);
+        this.manualPdfLoading = false;
+      }).catch(err => {
+        console.error('手册加载失败:', err);
+        this.$message.error('文档加载失败，请联系管理员');
+        this.manualPdfLoading = false;
+        this.manualPdfVisible = false;
+      });
+    },
+
+    closeManualPdf() {
+      if (this.manualPdfUrl) {
+        URL.revokeObjectURL(this.manualPdfUrl);
+        this.manualPdfUrl = '';
+      }
+    },
+
+    // ===== 手册上传（仅管理员）=====
+    triggerUpload(type) {
+      if (this.manualUploading) return;
+      this.manualPopoverVisible = false;
+      this.manualUploadType = type;
+      // 重置 input，确保选同一文件时仍能触发 change
+      this.$refs.manualFileInput.value = '';
+      this.$refs.manualFileInput.click();
+    },
+
+    handleManualUpload(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      if (file.type !== 'application/pdf') {
+        this.$message.error('请选择 PDF 格式文件');
+        return;
+      }
+      const typeName = this.manualUploadType === 'user' ? '用户手册' : '管理员手册';
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('type', this.manualUploadType);
+      this.manualUploading = true;
+      manualRequest.post('/file/manual/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      }).then(res => {
+        // manualRequest 无 response 拦截器，res.data 是原始 JSON
+        if (res.data && res.data.code === '200') {
+          this.$message.success(`${typeName}上传成功`);
+        } else {
+          this.$message.error((res.data && res.data.msg) || '上传失败，请重试');
+        }
+      }).catch(err => {
+        console.error('手册上传失败:', err);
+        this.$message.error('上传失败，请检查网络或联系管理员');
+      }).finally(() => {
+        this.manualUploading = false;
+      });
     }
   }
 }
 </script>
 
 <style scoped>
+/* ===== 操作手册按钮 ===== */
+/* manager-header-menu 改为 flex，让 el-menu 和手册按钮同行 */
+.manager-header-menu {
+  display: flex !important;
+  align-items: center;
+}
+.manual-btn-wrap {
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+.manual-trigger-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #646a73;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+  white-space: nowrap;
+}
+.manual-trigger-btn:hover {
+  color: #1f2329;
+  background-color: rgba(0, 0, 0, 0.04);
+}
+.manual-trigger-btn i:first-child {
+  font-size: 16px;
+  margin-bottom: 1px;
+}
+.manual-arrow {
+  font-size: 12px;
+  transition: transform 0.25s ease;
+}
+.manual-arrow.is-open {
+  transform: rotate(180deg);
+}
+
+/* ===== PDF 弹窗 ===== */
 /* 头部容器：Flex布局实现一行排列 */
 .manager-header {
   display: flex;
@@ -346,5 +553,20 @@ export default {
 /* 如果你使用了 <span> 包裹文字，确保它正常显示 */
 .el-menu--horizontal .el-menu-item span {
   vertical-align: middle;
+}
+
+/* ===== PDF 弹窗全局样式（需要用 ::v-deep 或全局覆盖） ===== */
+::v-deep .manual-pdf-dialog .el-dialog__body {
+  padding: 0;
+}
+.manual-pdf-body {
+  width: 100%;
+  height: 80vh;
+}
+.manual-pdf-iframe {
+  width: 100%;
+  height: 100%;
+  display: block;
+  border: none;
 }
 </style>
