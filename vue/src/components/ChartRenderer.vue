@@ -21,7 +21,7 @@
     <transition name="chart-collapse">
       <div v-show="!isCollapsed" class="chart-renderer">
         <!-- Configuration Panel -->
-        <div class="chart-config config-container" v-if="columns && columns.length > 0">
+        <div class="chart-config config-container" v-show="false">
           
           <!-- 第一行：图表类型 + X轴/分类 -->
           <div class="config-row">
@@ -166,6 +166,12 @@
 
         <!-- Chart Container -->
         <div class="chart-wrapper">
+          <!-- 图表左右切换导航 -->
+          <div class="chart-navigation" v-if="charts && charts.length > 1">
+            <el-button icon="el-icon-arrow-left" circle size="small" @click="prevChart" :disabled="currentChartIndex === 0" class="nav-btn"></el-button>
+            <span class="nav-text">{{ currentChartIndex + 1 }} / {{ charts.length }}</span>
+            <el-button icon="el-icon-arrow-right" circle size="small" @click="nextChart" :disabled="currentChartIndex === charts.length - 1" class="nav-btn"></el-button>
+          </div>
           <!-- 只有当有图表数据时才显示图表区域 -->
           <div v-if="chartOption" v-loading="loading" ref="chartRef" class="chart-content" :style="{ height: actualHeight + 'px' }"></div>
           <!-- 空状态占位 -->
@@ -197,7 +203,7 @@
 
         
         <!-- Chart Footer: 包含筛选控制和面包屑 -->
-        <div class="chart-footer-bar" v-if="chartOption">
+        <div class="chart-footer-bar" v-if="chartOption" v-show="charts.length === 0">
            <div class="footer-content">
               <!-- 已生效筛选标签区 (新增位置) -->
               <div class="footer-tags-row" v-if="appliedFilters.length > 0 || filterHistory.length > 0">
@@ -355,6 +361,10 @@ export default {
       type: Number,
       default: 450 // 【优化】默认高度改为450，为负数预留空间
     },
+    charts: {
+      type: Array,
+      default: () => []
+    },
     // 【新增】下钻功能所需的 props
     sql: {
       type: String,
@@ -370,6 +380,7 @@ export default {
       chartInstance: null,
       loading: false,
       isCollapsed: true, // 【修改】默认收起图表，用户主动展开后才生成
+      currentChartIndex: 0, // 当前展示的图表索引
       config: {
         chartType: 'bar',
         xAxisField: '',
@@ -580,6 +591,24 @@ export default {
         }
       },
       immediate: true
+    },
+    charts: {
+      handler(newCharts) {
+        if (newCharts && newCharts.length > 0) {
+          this.currentChartIndex = 0;
+          this.$nextTick(() => {
+            this.renderBackendChart();
+          });
+        }
+      },
+      immediate: true
+    },
+    currentChartIndex: {
+      handler(newIdx, oldIdx) {
+        if (newIdx !== oldIdx && this.charts && this.charts.length > 0) {
+          this.renderBackendChart();
+        }
+      }
     }
   },
   mounted() {
@@ -628,11 +657,69 @@ export default {
       return type.length > 8 ? type.substring(0, 8) : type;
     },
     
+    prevChart() {
+      if (this.currentChartIndex > 0) {
+        this.currentChartIndex--;
+      }
+    },
+    nextChart() {
+      if (this.currentChartIndex < this.charts.length - 1) {
+        this.currentChartIndex++;
+      }
+    },
+    
     // 【已禁用】自动渲染图表（现在只有用户点击"生成图表"按钮才渲染）
     autoRenderIfReady() {
-      // 【用户需求】取消自动生成图表，只有点击按钮才生成
-      // 保留此方法是为了兼容性，但不执行任何操作
+      // 如果后端有直接返回的图表配置，则直接渲染
+      if (this.charts && this.charts.length > 0) {
+        this.renderBackendChart();
+      }
       return;
+    },
+    
+    renderBackendChart() {
+      if (!this.charts || this.charts.length === 0) return;
+      const chartInfo = this.charts[this.currentChartIndex];
+      if (!chartInfo) return;
+
+      // 自动展开图表区域
+      this.isCollapsed = false;
+
+      this.loading = true;
+      try {
+        // 设置内部状态以匹配后端返回的图表类型，让 buildEChartsOption 正常处理格式
+        this.config.chartType = chartInfo.chartType || 'bar';
+
+        // 复用完善的 buildEChartsOption 构建返回项
+        this.chartOption = this.buildEChartsOption(chartInfo);
+
+        // 如果后端有传入标题，则设置标题并调整 grid 顶部间距，防止重叠
+        if (chartInfo.title) {
+          this.chartOption.title = { text: chartInfo.title, left: 'center', top: 0, textStyle: { fontSize: 13, fontWeight: 600, color: '#303133' } };
+          // 推离 grid 顶部，避免标题与柱状图重叠
+          if (this.chartOption.grid) {
+            const grids = Array.isArray(this.chartOption.grid) ? this.chartOption.grid : [this.chartOption.grid];
+            grids.forEach(g => { g.top = '56px'; });
+            this.chartOption.grid = grids.length === 1 ? grids[0] : grids;
+          }
+        }
+
+        // 【修复】不再强制禁用 bar/line 的 label：buildEChartsOption 内的 formatter 已实现
+        // "小值显示圆点、普通值隐藏" 的智能逻辑，此处强制 false 会把圆点也一起关掉
+        // 仅对饼图/雷达图不做处理（它们本身就需要显示 label）
+
+        this.$nextTick(() => {
+          if (this.chartInstance) {
+            this.chartInstance.dispose();
+            this.chartInstance = null;
+          }
+          this.initChart();
+        });
+      } catch (err) {
+        console.error('[ChartRenderer] 渲染后端图表配置失败:', err);
+      } finally {
+        this.loading = false;
+      }
     },
     
     // 导出图表为图片
@@ -1578,6 +1665,10 @@ export default {
 
       const parseNum = (v) => {
         if (v === null || v === undefined) return null;
+        // 兼容 ECharts 对象格式 {value: ..., ...}
+        if (typeof v === 'object' && v !== null && 'value' in v) {
+          v = v.value;
+        }
         if (typeof v === 'number') return v;
         const cleanVal = String(v).replace(/,/g, '');
         const num = parseFloat(cleanVal);
@@ -1729,13 +1820,28 @@ export default {
       
       // X 轴配置
       if (['bar', 'line', 'area'].includes(type)) {
+        // 【新增】轴名称：优先使用后端传入的 xAxisName，否则不显示
+        const xAxisName = data.xAxisName || '';
+        // 【修复】有轴名称时加宽右侧 grid，避免名称被截断（直接用像素，不混用百分比）
+        if (xAxisName) {
+          const namePixelWidth = xAxisName.length * 14 + 20; // 每字符~14px + 余量
+          option.grid.right = namePixelWidth + 'px';
+        }
         option.xAxis = {
           type: 'category',
           data: data.xAxisData || [],
-          boundaryGap: type === 'bar', // 【优化】折线图/面积图不需要留白，从轴开始
+          name: xAxisName,
+          nameLocation: 'end',
+          nameGap: 8,
+          nameTextStyle: {
+            color: '#606266',
+            fontSize: 11,
+            padding: [0, 0, 0, 6]
+          },
+          boundaryGap: type === 'bar',
           axisTick: { show: false },
           axisLine: { 
-            onZero: false, // 【关键修复】X轴线固定在底部，不随负数上移
+            onZero: false,
             lineStyle: { color: '#DCDFE6' } 
           },
           axisLabel: {
@@ -1746,8 +1852,6 @@ export default {
             formatter: (value) => {
               if (!value) return '';
               
-              // 【新增】尝试自动格式化时间轴
-              // 1. 获取当前X轴字段信息
               const xField = this.config.xAxisField;
               const cols = this.currentColumns.length > 0 ? this.currentColumns : this.columns;
               const colInfo = cols.find(c => c.name === xField);
@@ -1757,24 +1861,20 @@ export default {
                   const isTime = type.includes('DATE') || type.includes('TIME') || xField.toUpperCase().includes('日期') || xField.toUpperCase().includes('时间');
                   
                   if (isTime) {
-                      // 如果是数值型时间戳
                       if (typeof value === 'number' || (typeof value === 'string' && /^\d+$/.test(value))) {
                           const numVal = parseInt(value);
-                          // 简单判断: 13位是毫秒, 10位是秒
-                          if (numVal > 1000000000000) { // > 2001-09-09 (ms)
+                          if (numVal > 1000000000000) {
                               const date = new Date(numVal);
                               const m = (date.getMonth() + 1).toString().padStart(2, '0');
                               const d = date.getDate().toString().padStart(2, '0');
                               return `${date.getFullYear()}-${m}-${d}`;
-                          } else if (numVal > 1000000000) { // > 2001-09-09 (s)
+                          } else if (numVal > 1000000000) {
                               const date = new Date(numVal * 1000);
                               const m = (date.getMonth() + 1).toString().padStart(2, '0');
                               const d = date.getDate().toString().padStart(2, '0');
                               return `${date.getFullYear()}-${m}-${d}`; 
                           }
                       }
-                      
-                      // 【新增】如果是 ISO 日期字符串
                       if (typeof value === 'string' && !isNaN(Date.parse(value))) {
                           const date = new Date(value);
                           if (!isNaN(date.getTime())) {
@@ -1783,8 +1883,6 @@ export default {
                               const d = date.getDate().toString().padStart(2, '0');
                               const h = date.getHours();
                               const min = date.getMinutes();
-                              
-                              // 如果有具体时间（非0点），则换行显示时间，否则只显示日期
                               if (h === 0 && min === 0) {
                                   return `${y}-${m}-${d}`;
                               } else {
@@ -1794,12 +1892,9 @@ export default {
                       }
                   }
               }
-              
-              // 2. 如果是很长的数字，可能是ID或作为分类的数字，截断
               if (value.toString().length > 12 && /^\d+$/.test(value)) {
                   return value.toString().substring(0, 12) + '...';
               }
-              
               return value; 
             }
           }
@@ -1809,7 +1904,8 @@ export default {
 
       // Series配置
       let seriesList = [];
-      if (data.seriesData && Array.isArray(data.seriesData) && data.seriesData.length > 0) {
+      // 【修复】饼图/雷达图的 seriesData 格式与柱状图不同（无 .data 数组），跳过通用处理由下方专属分支处理
+      if (!['pie', 'radar'].includes(type) && data.seriesData && Array.isArray(data.seriesData) && data.seriesData.length > 0) {
         const isComplex = typeof data.seriesData[0] === 'object' && data.seriesData[0].name;
         
         // 【调试】输出后端返回的seriesData结构
@@ -1847,7 +1943,7 @@ export default {
                 smooth: 0.35,
                 showSymbol: false,
                 symbolSize: 6,
-                areaStyle: type === 'area' ? { opacity: 0.2 } : undefined,
+                areaStyle: type === 'area' ? { opacity: 0.35 } : undefined,
                 // 【优化】存储轴位置信息供tooltip使用
                 axisPosition: index % 2 === 0 ? '左轴' : '右轴'
               };
@@ -1863,7 +1959,7 @@ export default {
               smooth: 0.35,
               showSymbol: false,
               symbolSize: 6,
-              areaStyle: type === 'area' ? { opacity: 0.2 } : undefined
+              areaStyle: type === 'area' ? { opacity: 0.35 } : undefined
             }];
             console.log('[ChartRenderer] ⚠️ 单Y轴模式，数据长度:', data.seriesData.length);
           }
@@ -1967,24 +2063,27 @@ export default {
         
         console.log('[ChartRenderer] 🧪 科学对齐算法 计算出的统一0点位置 (0-1):', unifiedRatio);
         
+        // 【新增】解析 yAxisName 字符串（逗号分隔，对应多Y轴）
+        const yAxisNames = (data.yAxisName || '').split(',').map(s => s.trim()).filter(Boolean);
+        
         for (let i = 0; i <= maxIndex; i++) {
           const axisColor = colorPalette[i % colorPalette.length];
           const range = allRanges[i];
           
-          let finalMin = range.min;
-          let finalMax = range.max;
-          
+          // 【修复】仅在存在负值时手动设置 min/max 来对齐0刻度线
+          // 非负数据交给 ECharts 自动计算，避免出现如"115"之类超出实际数据的刻度
+          const axisMinMax = {};
           if (hasNegative) {
+              let finalMin = range.min;
+              let finalMax = range.max;
               const K = unifiedRatio;
               if (K === 0) {
                   finalMin = 0; finalMax = range.max * 1.1;
               } else if (K === 1) {
                   finalMin = range.min * 1.1; finalMax = 0;
               } else {
-                  // 根据统一比例 K 反推需要的Min/Max
                   const reqMax = -range.min * (1-K)/K;
                   const reqMin = -range.max * K/(1-K);
-                  
                   if (reqMax >= range.max) {
                       finalMax = reqMax;
                       finalMin = range.min;
@@ -1995,18 +2094,28 @@ export default {
                   finalMax *= 1.1;
                   finalMin *= 1.1;
               }
+              axisMinMax.min = finalMin;
+              axisMinMax.max = finalMax;
           } else {
-             finalMin = 0;
-             finalMax = range.max * 1.15;
+              // 非负数据且该轴确实没有负值时，固定 min:0 让柱从零开始
+              // 【修复】额外校验当前轴的实际 range.min，防止 hasNegative 漏检导致负值被截断
+              if (range && range.min >= 0) {
+                  axisMinMax.min = 0;
+              }
+              // 若 range.min < 0（hasNegative 漏检的极端情况），不设 min，让 ECharts 自动处理
           }
           
           yAxes.push({
             type: 'value',
-            name: '',
+            name: yAxisNames[i] || '',
+            nameTextStyle: {
+              color: colorPalette[i % colorPalette.length],
+              fontSize: 11,
+              padding: [0, 0, 0, 6]
+            },
             position: i % 2 === 0 ? 'left' : 'right',
             offset: Math.floor(i / 2) * 60,
-            min: finalMin,
-            max: finalMax,
+            ...axisMinMax,
             axisLabel: { 
               formatter: yAxisFormatter, 
               color: axisColor, // 【关联】标签颜色与系列颜色一致
@@ -2052,6 +2161,36 @@ export default {
             option.yAxis[0].splitLine.show = true;
         }
       }
+
+      // 【安全网】兜底修复：无论哪条路径设置了 yAxis，都扫描一遍 series 的实际最小值。
+      // 若某轴真实数据存在负值但 yAxis.min 被设为 ≥0（hasNegative 漏检或 data.yAxis 路径），
+      // 则删除 min/max 约束，让 ECharts 自动 scale（自动 scale 能生成干净的整数刻度，不会出现重复标签）。
+      if (option.yAxis && option.series && option.series.length > 0) {
+        const extractVal = (n) => {
+          if (n === null || n === undefined) return null;
+          if (typeof n === 'object' && 'value' in n) return n.value;
+          return typeof n === 'number' ? n : parseFloat(n);
+        };
+        const yAxisArray = Array.isArray(option.yAxis) ? option.yAxis : [option.yAxis];
+        yAxisArray.forEach((yAxis, axisIndex) => {
+          const relevantSeries = option.series.filter(s => (s.yAxisIndex || 0) === axisIndex);
+          const allVals = relevantSeries
+            .flatMap(s => (s.data || []).map(extractVal))
+            .filter(v => v !== null && !isNaN(v));
+          
+          if (allVals.length > 0) {
+            const actualMin = Math.min(...allVals);
+            console.log(`[ChartRenderer] 安全网检查 yAxis[${axisIndex}]: actualMin=${actualMin}, currentMin=${yAxis.min}`);
+            if (actualMin < 0 && (yAxis.min === undefined || yAxis.min >= 0)) {
+              // 有负值但 min 被设在 ≥0：删除约束，交给 ECharts 自动计算刻度
+              // 这样 ECharts 会生成干净的整数/小数刻度，不会产生重复标签
+              delete yAxis.min;
+              delete yAxis.max;
+              console.log(`[ChartRenderer] 安全网：已移除 yAxis[${axisIndex}] 的 min/max 约束，交由 ECharts 自动 scale`);
+            }
+          }
+        });
+      }
         
        // 【关键修复】预先计算每个Y轴的全局最大值，用于统一衡量"是否过小"
        const axisMaxValues = {};
@@ -2068,7 +2207,11 @@ export default {
        });
 
        // 【商业级优化】为柱状图/折线图添加数据标签、渐变色和阴影
-      option.series = option.series.map((item, index) => {
+       // 【清理】剔除后端冗余注入的 scatter 系列，防止它和我们自己的圆点逻辑冲突打架
+       if (['bar', 'line', 'area'].includes(type)) {
+         option.series = option.series.filter(item => item.type !== 'scatter');
+       }
+       option.series = option.series.map((item, index) => {
         if (item.type === 'bar') {
           const baseColor = colorPalette[index % colorPalette.length];
           const axisIdx = item.yAxisIndex || 0;
@@ -2079,19 +2222,14 @@ export default {
           // 【数据解析】兼容对象型数据和数值型数据
           const rawData = item.data || [];
           const getVal = (n) => (typeof n === 'object' && n !== null) ? (n.value ?? n) : n;
-          const validValues = rawData.map(getVal).filter(v => v !== null && v !== undefined && v !== 0).map(Math.abs);
-          
-          // 【阈值计算】
-          // 仅依赖坐标轴最大值的 2% 作为"极小值"判定标准 (解决小量级数据全部显示气泡的问题)
-          const globalMax = axisMaxValues[axisIdx] || 0;
-          const smallThreshold = globalMax * 0.02; // 2% 阈值
 
           return {
             ...item,
             barMaxWidth: 60, // 【优化】略微放宽最大宽度
             barCategoryGap: '20%',
             barGap: '10%',
-            // barMinHeight Removed: 0值不再显示微小色块
+            // 【原生自适应】为非 0 的极小值提供原生保底厚度，取代错位的伪圆点
+            barMinHeight: 3, 
             labelLayout: { hideOverlap: true }, // 【优化】防止标签重叠
             // 【重构】使用Label代替markPoint，确保自动对齐柱子
             label: {
@@ -2114,28 +2252,11 @@ export default {
                 // 1. 0值：显示美化后的数字 (灰色小标签)
                 if (val === 0) return '{zero|0}';
                 
-                const absVal = Math.abs(val);
-                let valStr = val.toString();
-                if (typeof val === 'number') {
-                     valStr = Number.isInteger(val) ? val.toString() : val.toFixed(2);
-                }
-                
-                // 2. 极小值(非0)：显示气泡 (换行堆叠，确保数字和点都居中)
-                if (absVal < smallThreshold) {
-                  return `{dot|●}\n{val|${valStr}}`;
-                }
-                
-                // 3. 正常值：不显示
+                // 2. 其余所有值均不再常驻显示文字或假圆点，由鼠标 Hover 时的 tooltip 负责详情展示
+                //    (极小值已有 barMinHeight 保障视觉存在感)
                 return '';
               },
               rich: {
-                dot: {
-                  color: baseColor,
-                  fontSize: 14,
-                  padding: [0, 4, 0, 0],
-                  textShadowBlur: 4,
-                  textShadowColor: baseColor
-                },
                 val: {
                   color: '#374151',
                   fontSize: 12,
@@ -2217,50 +2338,32 @@ export default {
           // 【数据解析】兼容对象型数据和数值型数据
           const rawData = item.data || [];
           const getVal = (n) => (typeof n === 'object' && n !== null) ? (n.value ?? n) : n;
-          const validValues = rawData.map(getVal).filter(v => v !== null && v !== undefined && v !== 0).map(Math.abs);
-          
-          // 【阈值计算】(复用柱状图逻辑)
-          // 纯比例计算，移除硬编码的100，确保适应不同量级的数据
-          const globalMax = axisMaxValues[axisIdx] || 0;
-          const smallThreshold = globalMax * 0.02; // 调整为 2%
 
-          // 【数据转换】为极小值强制开启 symbol 显示
-          const processedData = rawData.map(item => {
-              const val = getVal(item);
-              if (val === null || val === undefined) return val;
-              
-              const absVal = Math.abs(val);
-              // 如果是极小值（且非0，或者0也算），强制显示点
-              if (absVal < smallThreshold) {
-                  return {
-                      value: val,
-                      symbol: 'circle',
-                      symbolSize: 6,
-                      showSymbol: true, // 【关键】强制显示这个点
-                      itemStyle: {
-                          borderColor: baseColor,
-                          borderWidth: 2,
-                          color: '#fff' // 空心点效果
-                      },
-                      label: { show: true, position: 'top' } // 确保标签显示
-                  };
-              }
-              return val;
-          });
+          // 【重构】彻底移除静态假圆点判定机制。采用原生 ECharts 行为：
+          // 折线默认不显示大量圆点（保持干净），仅在鼠标悬停时原生显示圆点
 
           return {
             ...item,
-            data: processedData, // 使用处理后的数据
+            data: rawData.map(v => { // 还原为纯数值，不做对象包装
+              const n = getVal(v);
+              return (n === null || n === undefined) ? null : n;
+            }),
             smooth: 0.35,
-            showSymbol: false, // 默认隐藏其他点
+            // 全局关闭常驻 symbol 渲染，通过 ECharts 原生悬浮高亮来展示数据点
+            showSymbol: false,
+            symbol: 'circle',
+            symbolSize: 6,
+            itemStyle: {
+              color: '#fff',
+              borderColor: baseColor,
+              borderWidth: 2
+            },
             // 【万级数据防卡顿】开启数据降采样算法防止极其密集的点叠满屏幕
             sampling: 'lttb',
             labelLayout: { hideOverlap: true }, // 【优化】防止标签重叠
             lineStyle: {
-              width: 3, // 【优化】加粗线条，更有质感
-              shadowColor: hexToRgba(baseColor, 0.3), // 【优化】添加柔和光晕
-              shadowBlur: 10,
-              shadowOffsetY: 4
+              width: 2.5,
+              color: baseColor   // 明确使用系列颜色，不依赖 ECharts 自动推导
             },
              // 【修复】补全折线图的悬停置顶逻辑
             emphasis: {
@@ -2270,58 +2373,8 @@ export default {
               label: { show: true, z: 100 },
               lineStyle: { width: 4 }
             },
-            // 【优化】数据标签：借鉴柱状图逻辑，显示所有值
-            label: {
-              show: true, 
-              position: (params) => {
-                // 【借鉴柱状图】根据正负值智能定位
-                const val = getVal(params.value);
-                return val < 0 ? 'bottom' : 'top';
-              },
-              distance: 0, // 【用户需求】降低高度，贴近X轴
-              formatter: (params) => {
-                const val = getVal(params.value);
-                if (val === null || val === undefined) return '';
-
-                // 1. 0值：显示美化后的数字
-                if (val === 0) return '{zero|0}';
-                
-                const absVal = Math.abs(val);
-                let valStr = val.toString();
-                if (typeof val === 'number') {
-                   valStr = Number.isInteger(val) ? val.toString() : val.toFixed(2);
-                }
-                
-                // 2. 极小值(非0)：显示标签
-                if (absVal < smallThreshold) {
-                   return `{val|${valStr}}`; 
-                }
-                return '';
-              },
-              rich: {
-                val: {
-                  color: '#374151',
-                  fontSize: 11,
-                  fontFamily: 'Helvetica Neue, sans-serif',
-                  fontWeight: 600,
-                  backgroundColor: 'rgba(255,255,255,0.9)', 
-                  borderColor: hexToRgba(baseColor, 0.3),
-                  borderWidth: 1,
-                  padding: [2, 6],
-                  borderRadius: 4,
-                  shadowBlur: 2,
-                  shadowColor: 'rgba(0,0,0,0.1)'
-                },
-                zero: {
-                    color: '#909399',
-                    fontSize: 11,
-                    fontFamily: 'Helvetica Neue, sans-serif',
-                    padding: [2, 5],
-                    backgroundColor: 'rgba(240, 242, 245, 0.6)',
-                    borderRadius: 4
-                }
-              }
-            },
+            // 》数据标签：关闭常驻显示，具体数值仅通过 tooltip 悬浮显示
+            label: { show: false },
             // 【新增】也为折线图添加0线标记，方便识别正负
             markLine: {
               silent: true,
@@ -2598,12 +2651,48 @@ export default {
           option.series = seriesList;
       } else if (type === 'pie') {
           // 【优化】高级饼图配置
+          // 【修复】后端实际返回 seriesData（[{name, value}] 格式），而非 pieData，增加兜底逻辑
+          const pieRawData = data.pieData
+            || (Array.isArray(data.seriesData) && data.seriesData.length > 0 && data.seriesData[0] && 'value' in data.seriesData[0]
+                ? data.seriesData
+                : []);
+
+          // 饼图副标题：只展示 yAxisName（数值字段说明），不展示 xAxisName（饼图无 X 轴）
+          const pieYAxisName = data.yAxisName || '';
+          if (pieYAxisName) {
+            option.title = Object.assign({}, option.title, {
+              subtext: pieYAxisName,
+              subtextStyle: { color: '#909399', fontSize: 11 }
+            });
+          }
+
+          // 【修复】饼图使用内置多色调色盘（忽略 theme.color，防止后端只返回单色导致全部扇形颜色相同）
+          // 内置12色，足够覆盖常见的扇形数量
+          const PIE_PALETTE = [
+            '#3B82F6', '#06B6D4', '#8B5CF6', '#F59E0B', '#10B981',
+            '#6366F1', '#EC4899', '#14B8A6', '#F97316', '#A855F7',
+            '#EF4444', '#22C55E'
+          ];
+          const pieColoredData = pieRawData.map((item, idx) => {
+            const baseColor = PIE_PALETTE[idx % PIE_PALETTE.length];
+            return {
+              ...item,
+              itemStyle: {
+                ...(item.itemStyle || {}),
+                color: new echarts.graphic.RadialGradient(0.5, 0.5, 1, [
+                  { offset: 0, color: baseColor },
+                  { offset: 1, color: hexToRgba(baseColor, 0.6) }
+                ])
+              }
+            };
+          });
+
           option.series = [{
               type: 'pie',
               radius: ['45%', '70%'], // 环形
               center: ['50%', '45%'], // 居中，底部留空给图例
               avoidLabelOverlap: true,
-              data: data.pieData || [],
+              data: pieColoredData,
               // 【优化】标签配置 - 恢复显示
               label: {
                 show: true,
@@ -2624,21 +2713,13 @@ export default {
                   type: 'solid'
                 }
               },
-              // 【优化】每个扇形的样式
+              // 【优化】每个扇形共用的边框/阴影样式（颜色已在数据项上单独设置）
               itemStyle: {
                 borderRadius: 8,
                 borderColor: '#fff',
                 borderWidth: 2,
                 shadowBlur: 10,
-                shadowColor: 'rgba(0, 0, 0, 0.15)',
-                // 【关键】使用渐变色
-                color: (params) => {
-                  const baseColor = colorPalette[params.dataIndex % colorPalette.length];
-                  return new echarts.graphic.RadialGradient(0.5, 0.5, 1, [
-                    { offset: 0, color: baseColor },
-                    { offset: 1, color: hexToRgba(baseColor, 0.6) }
-                  ]);
-                }
+                shadowColor: 'rgba(0, 0, 0, 0.15)'
               },
               // 【优化】悬停效果 - 改善文字可见度
               emphasis: {
@@ -2766,8 +2847,38 @@ export default {
               }
           };
           
-          // 【修复】处理多个系列的雷达数据
+          // 【修复】处理多个系列的雷达数据：优先 radarData，后端可能返回 seriesData
           let radarSeries = [];
+          const radarRawData = (data.radarData && data.radarData.length > 0)
+            ? data.radarData
+            : null; // seriesData 格式的雷达数据在下方单独处理
+
+          if (radarRawData && Array.isArray(radarRawData) && radarRawData.length > 0) {
+            console.log('[ChartRenderer] 处理雷达图系列（radarData），总数:', radarRawData.length);
+            // 替换局部引用
+            data = { ...data, radarData: radarRawData };
+          } else if (data.seriesData && Array.isArray(data.seriesData) && data.seriesData.length > 0) {
+            // 后端通过 seriesData 返回雷达数据，格式: [{name: '指标1,指标2,...', data: [v1,v2,...]}]
+            console.log('[ChartRenderer] 雷达图使用 seriesData 兜底，seriesData:', data.seriesData);
+            const firstSeries = data.seriesData[0] || {};
+            const indicatorNames = (firstSeries.name || '').split(',').map(n => n.trim()).filter(Boolean);
+            const indicatorValues = Array.isArray(firstSeries.data) ? firstSeries.data : [];
+            if (indicatorNames.length > 0 && indicatorValues.length > 0) {
+              // 构建 indicator
+              const maxVal = Math.max(...indicatorValues.map(v => Math.abs(parseFloat(v) || 0))) * 1.2 || 100;
+              data = {
+                ...data,
+                indicator: indicatorNames.map(n => ({ name: n, max: maxVal })),
+                radarData: data.seriesData.map(s => ({
+                  name: s.name,
+                  value: Array.isArray(s.data) ? s.data : []
+                }))
+              };
+              // update option.radar indicator
+              option.radar.indicator = data.indicator;
+            }
+          }
+
           if (data.radarData && Array.isArray(data.radarData) && data.radarData.length > 0) {
             console.log('[ChartRenderer] 处理雷达图系列，总数:', data.radarData.length);
             
@@ -2830,7 +2941,7 @@ export default {
           
           option.series = radarSeries.length > 0 ? radarSeries : [{
               type: 'radar',
-              data: data.radarData || [],
+              data: (data.radarData || []).map ? (data.radarData || []) : [],
               symbol: 'circle',
               symbolSize: 8,
               lineStyle: {
@@ -4225,5 +4336,24 @@ export default {
   z-index: 99999;
 }
 
-</style>
+.chart-navigation {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 10px;
+}
+.chart-navigation .nav-text {
+  margin: 0 15px;
+  font-size: 14px;
+  color: #606266;
+}
+.chart-navigation .nav-btn {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  transition: all 0.3s ease;
+}
+.chart-navigation .nav-btn:hover {
+  transform: scale(1.1);
+  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.3);
+}
 
+</style>
