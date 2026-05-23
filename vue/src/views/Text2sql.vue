@@ -231,10 +231,12 @@
                     <!-- 图表渲染组件（执行成功且有数据时展示） -->
                     <ChartRenderer
                         v-if="!msg.sqlError && msg.chartData && msg.chartData.data && msg.chartData.data.length > 0"
+                        :key="msg.messageId"
                         :messageId="msg.messageId"
                         :originalData="msg.chartData.data"
                         :columns="msg.chartData.columns"
                         :suggestion="msg.chartData.suggestion"
+                        :charts="msg.chartData.charts || []"
                         :sql="msg.generatedSql"
                         :dbConfigId="selectedDatasourceId"
                         :height="350"
@@ -847,6 +849,7 @@ export default {
                     originalTotal: extraData.data.length,
                     columns: extraData.columns,
                     suggestion: extraData.suggestion || {},
+                    charts: extraData.charts || [],
                     displayedData: [],
                     page: 0,
                     pageSize: 50
@@ -1054,6 +1057,7 @@ export default {
                 originalTotal: extraData.data.length,
                 columns: extraData.columns,
                 suggestion: extraData.suggestion || {},
+                charts: extraData.charts || [],
                 displayedData: [],
                 page: 0,
                 pageSize: 50
@@ -1886,6 +1890,7 @@ export default {
                   originalTotal: extra.data.length,
                   columns: extra.columns,
                   suggestion: extra.suggestion || {},
+                  charts: extra.charts || [], // 【修复】重新生成时必须传递 charts，否则图表不显示
                   displayedData: [],
                   page: 0,
                   pageSize: 50
