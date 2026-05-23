@@ -8,7 +8,6 @@
             <div class="title-row">
               <div class="header-title">大模型配置</div>
               <el-radio-group v-model="modelMode" size="small" class="mode-toggle" @change="handleModeChange">
-
                 <el-radio-button label="local">本地模型</el-radio-button>
                 <el-radio-button label="online">在线模型</el-radio-button>
               </el-radio-group>
@@ -115,9 +114,9 @@
             </el-col>
 
             <el-col :span="12">
-              <el-form-item label="Base URL (接口地址)" prop="apiBaseUrl">
+              <el-form-item label="Base URL (接口地址)" prop="baseUrl">
                 <el-input
-                    v-model="llmForm.apiBaseUrl"
+                    v-model="llmForm.baseUrl"
                     :placeholder="defaultBaseUrlPlaceholder"
                     prefix-icon="el-icon-link">
                 </el-input>
@@ -125,9 +124,9 @@
             </el-col>
 
             <el-col :span="12">
-              <el-form-item label="模型名称 (Model Name)" prop="model">
+              <el-form-item label="模型名称 (Model Name)" prop="modelName">
                 <el-select
-                    v-model="llmForm.model"
+                    v-model="llmForm.modelName"
                     placeholder="请选择或输入模型"
                     filterable
                     allow-create
@@ -228,18 +227,18 @@
         <el-form :model="localForm" :rules="localRules" ref="localFormRef" label-position="top" class="sqlbot-form">
           <el-row :gutter="24">
             <el-col :span="12">
-              <el-form-item label="模型版本名称 (Model Name)" :prop="currentLocalType + 'Model'">
+              <el-form-item label="模型版本名称 (Model Name)" :prop="currentLocalType + 'ModelName'">
                 <el-input
-                    v-model="localForm[currentLocalType + 'Model']"
+                    v-model="localForm[currentLocalType + 'ModelName']"
                     placeholder="请输入模型版本名称"
                     prefix-icon="el-icon-cpu">
                 </el-input>
               </el-form-item>
             </el-col>
             <el-col :span="12">
-              <el-form-item label="模型部署地址 (Base URL)" :prop="currentLocalType + 'Url'">
+              <el-form-item label="模型部署地址 (Base URL)" :prop="currentLocalType + 'BaseUrl'">
                 <el-input
-                    v-model="localForm[currentLocalType + 'Url']"
+                    v-model="localForm[currentLocalType + 'BaseUrl']"
                     placeholder="例如: http://192.168.1.100:8000/v1"
                     prefix-icon="el-icon-link">
                 </el-input>
@@ -268,7 +267,7 @@ import deepseekLogo from '@/assets/model/icon_deepseek_colorful.png'
 import tongyonglogo from '@/assets/model/tongyong.png'
 
 const configRequest = axios.create({
-  baseURL: process.env.VUE_APP_BASEURL,
+  baseURL: process.env.VUE_APP_BASEURL + 'api/ai-model',
   timeout: 30000 // 增加超时时间以等待模型响应
 })
 
@@ -317,15 +316,15 @@ export default {
         other: tongyonglogo
       },
       llmForm: {
-        apiBaseUrl: '',
+        baseUrl: '',
         apiKey: '',
-        model: '',
+        modelName: '',
         timeout: 60
       },
       llmRules: {
         apiKey: [{ required: true, message: '请输入 API Key', trigger: 'blur' }],
-        apiBaseUrl: [{ required: true, message: '请输入接口地址', trigger: 'blur' }],
-        model: [{ required: true, message: '请选择或输入模型名称', trigger: 'change' }]
+        baseUrl: [{ required: true, message: '请输入接口地址', trigger: 'blur' }],
+        modelName: [{ required: true, message: '请选择或输入模型名称', trigger: 'change' }]
       },
 
       // 本地模型数据
@@ -338,35 +337,20 @@ export default {
         rerank: false
       },
       localForm: {
-        inferenceUrl: '',
-        inferenceModel: '',
-        embeddingUrl: '',
-        embeddingModel: '',
-        rerankUrl: '',
-        rerankModel: ''
+        inferenceBaseUrl: '',
+        inferenceModelName: '',
+        embeddingBaseUrl: '',
+        embeddingModelName: '',
+        rerankBaseUrl: '',
+        rerankModelName: ''
       },
       localRules: {
-        inferenceUrl: [{ required: true, message: '请输入模型部署地址', trigger: 'blur' }],
-        inferenceModel: [{ required: true, message: '请输入模型版本名称', trigger: 'blur' }],
-        embeddingUrl: [{ required: true, message: '请输入模型部署地址', trigger: 'blur' }],
-        embeddingModel: [{ required: true, message: '请输入模型版本名称', trigger: 'blur' }],
-        rerankUrl: [{ required: true, message: '请输入模型部署地址', trigger: 'blur' }],
-        rerankModel: [{ required: true, message: '请输入模型版本名称', trigger: 'blur' }]
-      },
-
-      // 前端显示 Provider -> 后端存储 Provider 的映射
-      providerValueMap: {
-        aliyun: 'Aliyun',
-        gpt: 'OpenAI',
-        deepseek: 'DeepSeek',
-        other: 'Other'
-      },
-      // 后端存储 Provider -> 前端显示 Provider 的映射
-      providerKeyMap: {
-        'Aliyun': 'aliyun',
-        'OpenAI': 'gpt',
-        'DeepSeek': 'deepseek',
-        'Other': 'other'
+        inferenceBaseUrl: [{ required: true, message: '请输入模型部署地址', trigger: 'blur' }],
+        inferenceModelName: [{ required: true, message: '请输入模型版本名称', trigger: 'blur' }],
+        embeddingBaseUrl: [{ required: true, message: '请输入模型部署地址', trigger: 'blur' }],
+        embeddingModelName: [{ required: true, message: '请输入模型版本名称', trigger: 'blur' }],
+        rerankBaseUrl: [{ required: true, message: '请输入模型部署地址', trigger: 'blur' }],
+        rerankModelName: [{ required: true, message: '请输入模型版本名称', trigger: 'blur' }]
       },
 
       // 预设选项配置
@@ -403,12 +387,12 @@ export default {
       },
       deep: true
     },
-    'localForm.inferenceUrl'() { this.localTestStatus.inference = false; },
-    'localForm.inferenceModel'() { this.localTestStatus.inference = false; },
-    'localForm.embeddingUrl'() { this.localTestStatus.embedding = false; },
-    'localForm.embeddingModel'() { this.localTestStatus.embedding = false; },
-    'localForm.rerankUrl'() { this.localTestStatus.rerank = false; },
-    'localForm.rerankModel'() { this.localTestStatus.rerank = false; }
+    'localForm.inferenceBaseUrl'() { this.localTestStatus.inference = false; },
+    'localForm.inferenceModelName'() { this.localTestStatus.inference = false; },
+    'localForm.embeddingBaseUrl'() { this.localTestStatus.embedding = false; },
+    'localForm.embeddingModelName'() { this.localTestStatus.embedding = false; },
+    'localForm.rerankBaseUrl'() { this.localTestStatus.rerank = false; },
+    'localForm.rerankModelName'() { this.localTestStatus.rerank = false; }
   },
   computed: {
     currentModelOptions() {
@@ -436,66 +420,69 @@ export default {
     selectProvider(provider) {
       this.currentProvider = provider;
       if (this.baseUrlMap[provider]) {
-        this.llmForm.apiBaseUrl = this.baseUrlMap[provider];
+        this.llmForm.baseUrl = this.baseUrlMap[provider];
       } else {
-        this.llmForm.apiBaseUrl = '';
+        this.llmForm.baseUrl = '';
       }
       if (this.modelOptionsMap[provider] && this.modelOptionsMap[provider].length > 0) {
-        const currentModelInNewList = this.modelOptionsMap[provider].some(m => m.value === this.llmForm.model);
-        if (!this.llmForm.model || !currentModelInNewList) {
-          this.llmForm.model = this.modelOptionsMap[provider][0].value;
+        const currentModelInNewList = this.modelOptionsMap[provider].some(m => m.value === this.llmForm.modelName);
+        if (!this.llmForm.modelName || !currentModelInNewList) {
+          this.llmForm.modelName = this.modelOptionsMap[provider][0].value;
         }
       } else if (provider === 'other') {
-        this.llmForm.model = '';
+        this.llmForm.modelName = '';
       }
     },
 
     loadLlmConfig() {
-      // 在线模型配置获取
-      configRequest.get('/config/get').then(res => {
-        if (res.code === '200' && res.data) {
-          const data = res.data;
-
-          if (data.type !== 'LOCAL') {
-            // 回填在线配置
-            this.llmForm = {
-              apiBaseUrl: data.apiBaseUrl || '',
-              apiKey: data.apiKey || '',
-              model: data.model || '',
-              timeout: data.timeout || 60
-            };
-
-            // 根据返回的 provider 设置当前选中的卡片
-            if (data.provider && this.providerKeyMap[data.provider]) {
-              this.currentProvider = this.providerKeyMap[data.provider];
-            } else {
-              this.detectProvider();
+      configRequest.get('/config/active').then(res => {
+        if (res.code === '200' && Array.isArray(res.data)) {
+          let hasOnline = false;
+          let hasLocal = false;
+          res.data.forEach(item => {
+            switch (item.modelType) {
+              case 'ONLINE_INFERENCE':
+                this.llmForm.baseUrl = item.baseUrl || '';
+                this.llmForm.apiKey = item.apiKey || '';
+                this.llmForm.modelName = item.modelName || '';
+                try {
+                  const extra = item.extraConfig ? JSON.parse(item.extraConfig) : {};
+                  this.llmForm.timeout = extra.timeout || 60;
+                } catch(e) {
+                  this.llmForm.timeout = 60;
+                }
+                hasOnline = true;
+                this.detectProvider();
+                break;
+              case 'LOCAL_INFERENCE':
+                this.localForm.inferenceModelName = item.modelName || '';
+                this.localForm.inferenceBaseUrl = item.baseUrl || '';
+                hasLocal = true;
+                break;
+              case 'LOCAL_EMBEDDING':
+                this.localForm.embeddingModelName = item.modelName || '';
+                this.localForm.embeddingBaseUrl = item.baseUrl || '';
+                break;
+              case 'RERANK':
+                this.localForm.rerankModelName = item.modelName || '';
+                this.localForm.rerankBaseUrl = item.baseUrl || '';
+                break;
             }
+          });
+          if (hasOnline) {
+             this.modelMode = 'online';
+          } else if (hasLocal) {
+             this.modelMode = 'local';
           }
         }
-      }).catch(err => console.error('加载LLM在线配置失败:', err));
-
-      // 本地模型配置获取
-      configRequest.get('/vllm/config').then(res => {
-        if (res.code === '200' && res.data) {
-          this.localForm = {
-            inferenceUrl: res.data.inferenceUrl || '',
-            inferenceModel: res.data.inferenceModel || '',
-            embeddingUrl: res.data.embeddingUrl || '',
-            embeddingModel: res.data.embeddingModel || '',
-            rerankUrl: res.data.rerankUrl || '',
-            rerankModel: res.data.rerankModel || ''
-          };
-          this.localTestStatus = { inference: false, embedding: false, rerank: false };
-        }
-      }).catch(err => console.error('加载LLM本地配置失败:', err));
+      }).catch(err => console.error('加载模型配置失败:', err));
     },
 
     detectProvider() {
-      const modelLower = (this.llmForm.model || '').toLowerCase();
-      const urlLower = (this.llmForm.apiBaseUrl || '').toLowerCase();
+      const modelLower = (this.llmForm.modelName || '').toLowerCase();
+      const urlLower = (this.llmForm.baseUrl || '').toLowerCase();
 
-      if (modelLower.includes('qwen') || urlLower.includes('aliyun')) {
+      if (modelLower.includes('qwen') || urlLower.includes('aliyun') || urlLower.includes('dashscope')) {
         this.currentProvider = 'aliyun';
       } else if (modelLower.includes('deepseek') || urlLower.includes('deepseek')) {
         this.currentProvider = 'deepseek';
@@ -510,18 +497,19 @@ export default {
       this.$refs.localFormRef.validate(valid => {
         if (valid) {
           this.localTesting = true;
-          const urlField = `${this.currentLocalType}Url`;
-          const modelField = `${this.currentLocalType}Model`;
+          const urlField = `${this.currentLocalType}BaseUrl`;
+          const modelField = `${this.currentLocalType}ModelName`;
           
-          const endpointMap = {
-            inference: '/vllm/test/inference',
-            embedding: '/vllm/test/embedding',
-            rerank: '/vllm/test/rerank'
+          const testEndpointMap = {
+            inference: '/test/inference',
+            embedding: '/test/embedding',
+            rerank: '/test/rerank'
           };
           
-          configRequest.post(endpointMap[this.currentLocalType], {
-            url: this.localForm[urlField],
-            model: this.localForm[modelField]
+          // 不传 apiKey，后端走本地裸连测试
+          configRequest.post(testEndpointMap[this.currentLocalType], {
+            baseUrl: this.localForm[urlField],
+            modelName: this.localForm[modelField]
           }).then(res => {
             if (res.code === '200') {
               this.$message.success('连通性测试成功');
@@ -547,18 +535,23 @@ export default {
       this.$refs.localFormRef.validate(valid => {
         if (valid) {
           this.localSaving = true;
-          const urlField = `${this.currentLocalType}Url`;
-          const modelField = `${this.currentLocalType}Model`;
+          const urlField = `${this.currentLocalType}BaseUrl`;
+          const modelField = `${this.currentLocalType}ModelName`;
           
-          // 仅提交当前修改的这组模型参数
-          const payload = {
-            [urlField]: this.localForm[urlField] || null,
-            [modelField]: this.localForm[modelField] || null
+          const endpointMap = {
+            inference: '/local-inference',
+            embedding: '/local-embedding',
+            rerank: '/rerank'
           };
 
-          configRequest.post('/vllm/config', payload).then(res => {
+          const payload = {
+            baseUrl: this.localForm[urlField] || null,
+            modelName: this.localForm[modelField] || null
+          };
+
+          configRequest.post(endpointMap[this.currentLocalType], payload).then(res => {
             if (res.code === '200') {
-              this.$message.success('本地模型配置已保存');
+              this.$message.success('本地模型配置已保存，模型已激活');
             } else {
               this.$message.error(res.msg || '保存失败');
             }
@@ -577,19 +570,19 @@ export default {
       this.$refs.llmFormRef.validate(valid => {
         if (valid) {
           this.llmSaving = true;
-          // 构造在线配置参数 (V2 文档)
           const payload = {
-            type: 'ONLINE',
-            provider: this.providerValueMap[this.currentProvider] || 'Other',
-            apiBaseUrl: this.llmForm.apiBaseUrl,
+            baseUrl: this.llmForm.baseUrl,
             apiKey: this.llmForm.apiKey,
-            model: this.llmForm.model,
+            modelName: this.llmForm.modelName,
             timeout: this.llmForm.timeout
           };
 
-          configRequest.post('/config/save', payload).then(res => {
-            if (res.code === '200') this.$message.success('大模型配置保存成功');
-            else this.$message.error(res.msg || '保存失败');
+          configRequest.post('/online-inference', payload).then(res => {
+            if (res.code === '200') {
+              this.$message.success('大模型配置保存成功，模型已激活');
+            } else {
+              this.$message.error(res.msg || '保存失败');
+            }
           }).finally(() => { this.llmSaving = false; });
         }
       });
@@ -599,17 +592,16 @@ export default {
       this.$refs.llmFormRef.validate(valid => {
         if (valid) {
           this.llmTesting = true;
-          // 调用 V2 测试接口
-          configRequest.post('/config/test', {
-            apiBaseUrl: this.llmForm.apiBaseUrl,
+          configRequest.post('/test/inference', {
+            baseUrl: this.llmForm.baseUrl,
             apiKey: this.llmForm.apiKey,
-            model: this.llmForm.model
+            modelName: this.llmForm.modelName,
+            timeout: this.llmForm.timeout
           }).then(res => {
             if (res.code === '200') {
               this.$message.success('连接成功');
               this.isTestPassed = true;
             } else {
-              // 处理错误信息 (余额不足等)
               this.$message.error(res.msg || '连接失败');
               this.isTestPassed = false;
             }
@@ -634,7 +626,7 @@ export default {
 }
 
 .sqlbot-container {
-  padding: 12px; /* 从 20px 减少到 12px，减少空白 */
+  padding: 12px;
   background-color: #f7f8fa;
   min-height: calc(100vh - 80px);
   box-sizing: border-box;
@@ -646,14 +638,13 @@ export default {
   background: #ffffff;
   border-radius: 8px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-  padding: 20px; /* 从 30px 减少到 20px，让内容区域更宽 */
+  padding: 20px;
   flex: 1;
 }
 
-/* 头部样式调整 - 优化间距 */
 .page-header {
-  margin-bottom: 18px; /* 减少底部间距 */
-  padding-bottom: 12px; /* 减少内边距 */
+  margin-bottom: 18px;
+  padding-bottom: 12px;
   border-bottom: 1px solid #f0f0f0;
 }
 .header-content {
@@ -663,13 +654,12 @@ export default {
 .header-left {
   display: flex;
   flex-direction: column;
-  gap: 6px; /* 增加标题和描述之间的间距 */
+  gap: 6px;
 }
-/* 标题和按钮在一行 */
 .title-row {
   display: flex;
   align-items: center;
-  gap: 16px; /* 减少间距，让标题和按钮更紧凑 */
+  gap: 16px;
 }
 .header-title {
   font-size: 20px;
@@ -678,25 +668,20 @@ export default {
   margin: 0;
 }
 .header-desc {
-  font-size: 13px; /* 略微缩小字体 */
+  font-size: 13px;
   color: #909399;
   margin: 0;
 }
-/* 按钮样式微调 */
 .mode-toggle {
   transform: translateY(1px);
 }
 
-.tab-content {
-  /* max-width removed */
-}
-
 .section-title {
-  font-size: 15px; /* 略微缩小 */
+  font-size: 15px;
   font-weight: 600;
   color: #2d2e31;
-  margin-bottom: 16px; /* 减少底部间距 */
-  margin-top: 8px; /* 添加顶部间距 */
+  margin-bottom: 16px;
+  margin-top: 8px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -719,8 +704,8 @@ export default {
 
 .provider-selector {
   display: flex;
-  gap: 16px; /* 减少卡片间距 */
-  margin-bottom: 20px; /* 减少底部间距 */
+  gap: 16px;
+  margin-bottom: 20px;
 }
 .provider-card {
   flex: 1;
