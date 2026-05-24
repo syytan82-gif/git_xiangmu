@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="sql-chat-container">
 
     <div class="chat-sidebar" :class="{ 'collapsed': !isSidebarOpen }">
@@ -88,6 +88,22 @@
                 style="margin-left: 8px;"
                 @click="loadDatasourceList"
             >重新加载</el-button>
+          </el-tooltip>
+        </div>
+        <!-- 数据解读开关按钮 -->
+        <div class="ds-right">
+          <el-tooltip :content="dataInterpretationEnabled ? '数据解读已开启，发送问题后将自动分析' : '开启后，发送问题将自动进行数据解读'" placement="bottom" :open-delay="300">
+            <div
+                class="di-toggle-btn"
+                :class="{ active: dataInterpretationEnabled }"
+                @click="dataInterpretationEnabled = !dataInterpretationEnabled"
+            >
+              <i class="el-icon-data-analysis"></i>
+              <span>数据解读</span>
+              <div class="di-toggle-switch" :class="{ on: dataInterpretationEnabled }">
+                <div class="di-toggle-thumb"></div>
+              </div>
+            </div>
           </el-tooltip>
         </div>
       </div>
@@ -242,6 +258,34 @@
                         :height="350"
                         @update-data="handleChartDataUpdate(index, $event)"
                     />
+
+                    <!-- 数据解读结果区域 -->
+                    <div v-if="msg.interpretation" class="di-result-wrapper">
+                      <div class="di-result-header">
+                        <i class="el-icon-data-analysis"></i>
+                        <span>数据解读</span>
+                        <span v-if="msg.interpretation.status === 'processing'" class="di-status processing">
+                          <i class="el-icon-loading"></i> 分析中...
+                        </span>
+                        <span v-if="msg.interpretation.status === 'completed'" class="di-status completed">
+                          <i class="el-icon-circle-check"></i> 已完成
+                        </span>
+                        <span v-if="msg.interpretation.status === 'failed'" class="di-status failed">
+                          <i class="el-icon-circle-close"></i> 失败
+                        </span>
+                      </div>
+                      <div v-if="msg.interpretation.status === 'processing'" class="di-result-body di-loading">
+                        <div class="di-dot-wave">
+                          <span></span><span></span><span></span><span></span>
+                        </div>
+                        <span>正在对数据进行深度解读，请稍候...</span>
+                      </div>
+                      <div v-if="msg.interpretation.status === 'completed' && msg.interpretation.text" class="di-result-body markdown-body" v-html="renderContent(msg.interpretation.text)"></div>
+                      <div v-if="msg.interpretation.status === 'failed'" class="di-result-body di-error">
+                        <i class="el-icon-warning-outline"></i>
+                        {{ msg.interpretation.errorMsg || '数据解读失败，请稍后重试' }}
+                      </div>
+                    </div>
                   </div>
 
                   <!-- 普通文本回复（用户消息或无SQL的AI消息） -->
@@ -255,6 +299,15 @@
                   </el-tooltip>
                   <el-tooltip v-if="msg.role === 1 && msg.messageId && msg.chartData && msg.chartData.data && msg.chartData.data.length > 0" content="下载 Excel" placement="top" :open-delay="500">
                     <i class="el-icon-download action-icon" @click="downloadExcel(msg.messageId)"></i>
+                  </el-tooltip>
+                  <!-- 手动触发数据解读（仅在开关关闭时显示，有数据且尚未解读或解读失败时可用） -->
+                  <el-tooltip
+                      v-if="!dataInterpretationEnabled && msg.role === 1 && msg.messageId && msg.chartData && msg.chartData.data && msg.chartData.data.length > 0 && (!msg.interpretation || msg.interpretation.status === 'failed')"
+                      content="数据解读"
+                      placement="top"
+                      :open-delay="500"
+                  >
+                    <i class="el-icon-data-analysis action-icon di-manual-btn" @click="handleManualInterpretation(msg, index)"></i>
                   </el-tooltip>
                   <el-tooltip v-if="msg.role === 1 && msg.messageId" :content="msg.evaluation === 'like' ? '取消点赞' : '点赞'" placement="top" :open-delay="500">
                     <i
@@ -514,7 +567,10 @@ export default {
       feedbackTargetMessageId: null, // 当前反馈对应的消息 ID
       feedbackSelectedReason: '',    // 已选反馈标签
       feedbackInput: '',             // 反馈输入内容
-      feedbackReasonOptions: ['SQL不准确', '结果不完整', '解释不清楚', '执行报错', '响应太慢', '其他']
+      feedbackReasonOptions: ['SQL不准确', '结果不完整', '解释不清楚', '执行报错', '响应太慢', '其他'],
+      // 数据解读
+      dataInterpretationEnabled: true,   // 数据解读开关（默认开启）
+      interpretationPollingMap: {}        // { [messageId]: intervalId } 正在轮询的任务
     };
   },
   computed: {
@@ -587,6 +643,8 @@ export default {
     document.removeEventListener('click', this.handleGlobalClick);
     if (this.loadingTimer) clearInterval(this.loadingTimer);
     if (this.typewriterTimer) clearInterval(this.typewriterTimer);
+    // 清理所有进行中的数据解读轮询
+    Object.values(this.interpretationPollingMap || {}).forEach(id => clearInterval(id));
   },
   methods: {
     // ===== FAQ 方法 =====
@@ -1125,10 +1183,16 @@ export default {
             sqlError: sqlError || null, // SQL 执行错误信息
             messageId: msgData.id,
             evaluation: msgData.evaluation || null,
-            feedback: msgData.feedback || null
+            feedback: msgData.feedback || null,
+            interpretation: null
           });
 
           this.typewriterEffect(aiReplyContent, newMsgIndex);
+
+          // 数据解读：有数据 && 开关已开启 && 有messageId 时自动触发
+          if (this.dataInterpretationEnabled && msgData.id && chartData && chartData.data && chartData.data.length > 0) {
+            this.startDataInterpretation(msgData.id, userQuestion, newMsgIndex);
+          }
         }
 
         this.refreshHistoryList();
@@ -1914,9 +1978,18 @@ export default {
             sqlError: sqlError || null,
             messageId: newMsg.id,
             evaluation: newMsg.evaluation || null,
-            feedback: newMsg.feedback || null
+            feedback: newMsg.feedback || null,
+            interpretation: null
           });
           this.typewriterEffect(aiReplyContent, newMsgIndex);
+
+          // 数据解读：有数据 && 开关已开启 && 有messageId 时自动触发
+          if (this.dataInterpretationEnabled && newMsg.id && chartData && chartData.data && chartData.data.length > 0) {
+            // 找到最后一条 AI 消息的问题（重新回答时取最近用户消息）
+            const lastUser = [...this.currentMessagesData].reverse().find(m => m.role === 0);
+            const regenQuestion = lastUser ? lastUser.content : '';
+            this.startDataInterpretation(newMsg.id, regenQuestion, newMsgIndex);
+          }
         } else {
           this.currentMessagesData.push({
             role: 1,
@@ -1942,6 +2015,153 @@ export default {
         });
         this.scrollToBottom();
       });
+    },
+
+    // ===== 数据解读 =====
+
+    /**
+     * 提交数据解读任务，并开始轮询
+     * @param {number} messageId - AI消息ID
+     * @param {string} question  - 用户原始问题
+     * @param {number} msgIndex  - 消息在currentMessagesData中的下标
+     */
+    startDataInterpretation(messageId, question, msgIndex) {
+      if (!messageId) return;
+
+      // 如果已有轮询在跑，先清掉
+      this.stopInterpretationPolling(messageId);
+
+      // 初始化解读状态
+      this.$set(this.currentMessagesData[msgIndex], 'interpretation', {
+        status: 'processing',
+        text: null,
+        errorMsg: null
+      });
+
+      const dbConfigId = this.selectedDatasourceId;
+      const interpretQuestion = question || '请帮我详细解读这批数据的关键信息和趋势';
+
+      request.post('/api/data-interpretation/start', {
+        messageId,
+        dbConfigId,
+        question: interpretQuestion
+      }).then(res => {
+        if (res.data.code === '200') {
+          // 提交成功，开始轮询
+          this.pollInterpretationStatus(messageId, msgIndex);
+        } else {
+          this.$set(this.currentMessagesData[msgIndex], 'interpretation', {
+            status: 'failed',
+            text: null,
+            errorMsg: res.data.msg || '提交解读任务失败'
+          });
+        }
+      }).catch(() => {
+        this.$set(this.currentMessagesData[msgIndex], 'interpretation', {
+          status: 'failed',
+          text: null,
+          errorMsg: '网络异常，数据解读提交失败'
+        });
+      });
+    },
+
+    /**
+     * 开始轮询解读结果（每3秒一次）
+     */
+    pollInterpretationStatus(messageId, msgIndex) {
+      // 最多轮询 5 分钟（100次 × 3s）
+      let pollCount = 0;
+      const maxPolls = 100;
+
+      const timerId = setInterval(async () => {
+        pollCount++;
+        if (pollCount > maxPolls) {
+          this.stopInterpretationPolling(messageId);
+          const msg = this.currentMessagesData[msgIndex];
+          if (msg && msg.interpretation && msg.interpretation.status === 'processing') {
+            this.$set(msg, 'interpretation', { status: 'failed', text: null, errorMsg: '数据解读超时，请稍后重试' });
+          }
+          return;
+        }
+
+        try {
+          const res = await request.get(`/api/data-interpretation/status/message/${messageId}`);
+          if (res.data.code !== '200') return;
+
+          const statusData = res.data.data || {};
+          const status = statusData.status;
+
+          if (status === 'completed') {
+            this.stopInterpretationPolling(messageId);
+            // 解析结果（result 可能是 JSON 字符串）
+            let resultText = '';
+            try {
+              const resultObj = typeof statusData.result === 'string'
+                  ? JSON.parse(statusData.result)
+                  : statusData.result;
+              console.log('[DataInterpretation] 解析后的 resultObj:', resultObj);
+              // 按优先级依次尝试各字段：report → data.text → text → 原始字符串
+              resultText = (resultObj && resultObj.report)
+                  ? resultObj.report
+                  : (resultObj && resultObj.data && resultObj.data.text)
+                  ? resultObj.data.text
+                  : (resultObj && resultObj.text)
+                  ? resultObj.text
+                  : (statusData.result || '');
+            } catch (e) {
+              resultText = statusData.result || '';
+            }
+            if (this.currentMessagesData[msgIndex]) {
+              this.$set(this.currentMessagesData[msgIndex], 'interpretation', {
+                status: 'completed',
+                text: resultText,
+                errorMsg: null
+              });
+            }
+          } else if (status === 'failed') {
+            this.stopInterpretationPolling(messageId);
+            if (this.currentMessagesData[msgIndex]) {
+              this.$set(this.currentMessagesData[msgIndex], 'interpretation', {
+                status: 'failed',
+                text: null,
+                errorMsg: statusData.errorMsg || '数据解读失败'
+              });
+            }
+          }
+          // processing 状态继续等待
+        } catch (e) {
+          console.warn('[Text2sql] 轮询数据解读状态异常:', e);
+        }
+      }, 3000);
+
+      this.$set(this.interpretationPollingMap, messageId, timerId);
+    },
+
+    /**
+     * 停止指定messageId的轮询
+     */
+    stopInterpretationPolling(messageId) {
+      const timerId = this.interpretationPollingMap[messageId];
+      if (timerId) {
+        clearInterval(timerId);
+        this.$delete(this.interpretationPollingMap, messageId);
+      }
+    },
+
+    /**
+     * 操作栏手动触发数据解读（开关关闭时使用）
+     */
+    handleManualInterpretation(msg, index) {
+      if (!msg || !msg.messageId) return;
+      // 向上找最近一条用户消息作为解读问题
+      let question = '';
+      for (let i = index - 1; i >= 0; i--) {
+        if (this.currentMessagesData[i] && this.currentMessagesData[i].role === 0) {
+          question = this.currentMessagesData[i].content || '';
+          break;
+        }
+      }
+      this.startDataInterpretation(msg.messageId, question, index);
     }
   },
   watch: {
@@ -2236,6 +2456,172 @@ export default {
 .ds-option-tag { flex-shrink: 0; }
 .ds-option-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* --- 数据解读开关按钮 --- */
+.ds-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.di-toggle-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px 6px 12px;
+  border-radius: 20px;
+  border: 1.5px solid #dcdfe6;
+  background: #f5f7fa;
+  color: #606266;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  user-select: none;
+  white-space: nowrap;
+}
+.di-toggle-btn:hover {
+  border-color: #3370ff;
+  color: #3370ff;
+  background: #f0f5ff;
+}
+.di-toggle-btn.active {
+  border-color: #3370ff;
+  background: linear-gradient(135deg, #e8efff 0%, #f0f5ff 100%);
+  color: #3370ff;
+  box-shadow: 0 2px 10px rgba(51, 112, 255, 0.15);
+}
+.di-toggle-btn i {
+  font-size: 15px;
+}
+
+/* 操作栏手动解读按钮 */
+.di-manual-btn {
+  color: #3370ff !important;
+}
+.di-manual-btn:hover {
+  color: #2559d9 !important;
+}
+
+/* 小型拨动开关 */
+.di-toggle-switch {
+  width: 32px;
+  height: 18px;
+  border-radius: 9px;
+  background: #c0c4cc;
+  position: relative;
+  transition: background 0.25s;
+  flex-shrink: 0;
+}
+.di-toggle-switch.on {
+  background: #3370ff;
+}
+.di-toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.di-toggle-switch.on .di-toggle-thumb {
+  transform: translateX(14px);
+}
+
+/* --- 数据解读结果卡片 --- */
+.di-result-wrapper {
+  margin-top: 16px;
+  border: 1.5px solid #e0e9ff;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #f8fbff 0%, #f0f5ff 100%);
+  overflow: hidden;
+  animation: fadeInUp 0.3s ease;
+}
+.di-result-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 16px;
+  background: linear-gradient(90deg, #eef3ff 0%, #f5f8ff 100%);
+  border-bottom: 1px solid #e0e9ff;
+  font-size: 13px;
+  font-weight: 600;
+  color: #3370ff;
+}
+.di-result-header i {
+  font-size: 15px;
+}
+.di-status {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 400;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+.di-status.processing {
+  color: #e6a23c;
+  background: #fef9ec;
+}
+.di-status.completed {
+  color: #67c23a;
+  background: #f0f9eb;
+}
+.di-status.failed {
+  color: #f56c6c;
+  background: #fef0f0;
+}
+.di-result-body {
+  padding: 14px 18px;
+  font-size: 14px;
+  line-height: 1.8;
+  color: #303133;
+}
+.di-result-body.di-loading {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: #909399;
+  font-size: 13px;
+  padding: 16px 18px;
+}
+.di-result-body.di-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #f56c6c;
+  font-size: 13px;
+}
+
+/* 波浪点动画 */
+.di-dot-wave {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.di-dot-wave span {
+  display: block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #3370ff;
+  animation: diWave 1.2s ease-in-out infinite;
+}
+.di-dot-wave span:nth-child(1) { animation-delay: 0s; }
+.di-dot-wave span:nth-child(2) { animation-delay: 0.15s; }
+.di-dot-wave span:nth-child(3) { animation-delay: 0.3s; }
+.di-dot-wave span:nth-child(4) { animation-delay: 0.45s; }
+
+@keyframes diWave {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.6; }
+  30% { transform: translateY(-6px); opacity: 1; }
+}
+
 /* 聊天界面 */
 .chat-interface-wrapper {
   display: flex;
@@ -2397,12 +2783,103 @@ export default {
   box-shadow: inset 0 0 0 1px rgba(185, 28, 28, 0.24);
 }
 
-/* Markdown */
+/* Markdown 正文样式 */
 ::v-deep .markdown-body p {
   margin-bottom: 1em;
 }
 ::v-deep .markdown-body p:last-child {
   margin-bottom: 0;
+}
+::v-deep .markdown-body h1,
+::v-deep .markdown-body h2,
+::v-deep .markdown-body h3,
+::v-deep .markdown-body h4 {
+  font-weight: 700;
+  line-height: 1.4;
+  margin-top: 1.4em;
+  margin-bottom: 0.6em;
+  color: #1f2329;
+}
+::v-deep .markdown-body h1 { font-size: 1.35em; border-bottom: 2px solid #e4e7ed; padding-bottom: 0.3em; }
+::v-deep .markdown-body h2 { font-size: 1.15em; border-bottom: 1px solid #ebeef5; padding-bottom: 0.2em; }
+::v-deep .markdown-body h3 { font-size: 1.05em; }
+::v-deep .markdown-body h4 { font-size: 0.95em; color: #606266; }
+
+/* 表格 */
+::v-deep .markdown-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 13px;
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+::v-deep .markdown-body th {
+  background: #f0f4ff;
+  color: #3370ff;
+  font-weight: 600;
+  padding: 9px 14px;
+  text-align: left;
+  border: 1px solid #dce6ff;
+}
+::v-deep .markdown-body td {
+  padding: 8px 14px;
+  border: 1px solid #ebeef5;
+  color: #303133;
+}
+::v-deep .markdown-body tr:nth-child(even) td {
+  background: #f8fbff;
+}
+::v-deep .markdown-body tr:hover td {
+  background: #eef3ff;
+  transition: background 0.15s;
+}
+
+/* 列表 */
+::v-deep .markdown-body ul,
+::v-deep .markdown-body ol {
+  padding-left: 1.5em;
+  margin: 0.5em 0 1em;
+}
+::v-deep .markdown-body li {
+  margin-bottom: 0.35em;
+  line-height: 1.7;
+  color: #303133;
+}
+::v-deep .markdown-body ul li { list-style-type: disc; }
+::v-deep .markdown-body ol li { list-style-type: decimal; }
+
+/* 引用块 */
+::v-deep .markdown-body blockquote {
+  border-left: 4px solid #3370ff;
+  background: #f0f5ff;
+  margin: 1em 0;
+  padding: 10px 16px;
+  border-radius: 0 6px 6px 0;
+  color: #4a5a80;
+  font-size: 13px;
+}
+
+/* 强调 */
+::v-deep .markdown-body strong { font-weight: 700; color: #1f2329; }
+::v-deep .markdown-body em { font-style: italic; color: #606266; }
+
+/* 分割线 */
+::v-deep .markdown-body hr {
+  border: none;
+  border-top: 1px solid #ebeef5;
+  margin: 1.2em 0;
+}
+
+/* 行内代码 */
+::v-deep .markdown-body code:not([class]) {
+  background: #f2f3f5;
+  color: #e6450f;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.875em;
+  font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
 }
 
 /* 全屏表格弹窗样式 */
