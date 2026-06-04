@@ -4,4 +4,5 @@ vue/node_modules/
 
 # 忽略编译打包后的文件
 dist/
-vue/dist/
+vue/dist/".idea/" 
+"vue.zip" 
