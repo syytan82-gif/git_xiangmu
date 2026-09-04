@@ -442,12 +442,15 @@ export default {
     const user = JSON.parse(localStorage.getItem('xm-user') || '{}');
     this.username = user.username || 'admin';
     this.fetchHistory(this.activeTab);
+    // 恢复切换页面前未完成的轮询任务
+    this._resumePendingTasks();
   },
   beforeDestroy() {
-    // 清除所有定时器
+    // 只清定时器，不清 localStorage（后台任务可能仍在进行，下次进入页面需要恢复）
     Object.keys(this.pollingTimers).forEach(key => {
       if (this.pollingTimers[key]) {
         clearInterval(this.pollingTimers[key]);
+        this.pollingTimers[key] = null;
       }
     });
   },
@@ -598,6 +601,48 @@ export default {
       }).catch(() => {});
     },
 
+    // --- 持久化辅助方法 ---
+    // 将进行中的 taskId 写入 localStorage，防止切换页面后丢失
+    _savePendingTask(tabName, taskId) {
+      const key = 'xm-pending-tasks';
+      const tasks = JSON.parse(localStorage.getItem(key) || '{}');
+      tasks[tabName] = taskId;
+      localStorage.setItem(key, JSON.stringify(tasks));
+    },
+
+    // 任务完成/失败后，从 localStorage 移除
+    _clearPendingTask(tabName) {
+      const key = 'xm-pending-tasks';
+      const tasks = JSON.parse(localStorage.getItem(key) || '{}');
+      delete tasks[tabName];
+      localStorage.setItem(key, JSON.stringify(tasks));
+    },
+
+    // 组件挂载时，检查是否有未完成的任务需要恢复
+    _resumePendingTasks() {
+      const key = 'xm-pending-tasks';
+      const tasks = JSON.parse(localStorage.getItem(key) || '{}');
+      Object.keys(tasks).forEach(tabName => {
+        const taskId = tasks[tabName];
+        if (taskId) {
+          console.log(`[FileUpload] 恢复轮询任务: tabName=${tabName}, taskId=${taskId}`);
+          this.$message.info(`检测到「${this._getTabLabel(tabName)}」文件仍在后台处理，继续监控中...`);
+          this.pollTaskStatus(taskId, tabName);
+        }
+      });
+    },
+
+    // 获取 tab 的中文名称（用于提示信息）
+    _getTabLabel(tabName) {
+      const labelMap = {
+        schema: '数据模式',
+        case: '案例对',
+        rule: '行业术语',
+        mapping: '部门表'
+      };
+      return labelMap[tabName] || tabName;
+    },
+
     // --- 核心逻辑：异步任务状态轮询 ---
     pollTaskStatus(taskId, tabName) {
       // 映射 tabName 到 loading 状态的 key
@@ -615,6 +660,9 @@ export default {
         clearInterval(this.pollingTimers[tabName]);
         this.pollingTimers[tabName] = null;
       }
+
+      // 持久化 taskId，防止切换页面后丢失
+      this._savePendingTask(tabName, taskId);
       
       this.loading[loadingKey] = true;
       let isCompleted = false;
@@ -640,6 +688,7 @@ export default {
                 clearInterval(this.pollingTimers[tabName]);
                 this.pollingTimers[tabName] = null;
                 this.loading[loadingKey] = false;
+                this._clearPendingTask(tabName); // 清除持久化记录
                 this.$message.success('文件处理成功！');
                 this.fetchHistory(tabName); // 刷新列表
               }
@@ -649,6 +698,7 @@ export default {
                 clearInterval(this.pollingTimers[tabName]);
                 this.pollingTimers[tabName] = null;
                 this.loading[loadingKey] = false;
+                this._clearPendingTask(tabName); // 清除持久化记录
                 const errorMsg = data.result ? data.result.error : '未知错误';
                 this.$message.error(`文件处理失败: ${errorMsg}`);
               }
@@ -666,6 +716,7 @@ export default {
                 clearInterval(this.pollingTimers[tabName]);
                 this.pollingTimers[tabName] = null;
                 this.loading[loadingKey] = false;
+                this._clearPendingTask(tabName); // 清除持久化记录
                 this.$message.error('状态查询超时或失败次数过多，后台任务可能仍在进行，请稍后刷新列表查看结果。');
               }
             });
