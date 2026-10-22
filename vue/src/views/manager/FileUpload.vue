@@ -24,6 +24,7 @@
               </el-link>
             </div>
 
+            
             <el-form label-position="top" class="sqlbot-form">
               <el-form-item>
                 <el-upload
@@ -35,7 +36,7 @@
                     :limit="20"
                     multiple
                     :file-list="fileListSingleSchema"
-                    :disabled="loading.processingSchema">
+                    :disabled="schemaProcessing">
                   <div class="upload-content">
                     <i class="el-icon-folder-opened upload-icon"></i>
                     <div class="el-upload__text">拖拽或 <em>点击上传</em> 模式与字典合并文件 (Excel)</div>
@@ -44,13 +45,19 @@
                 </el-upload>
               </el-form-item>
               <div class="form-actions">
+                <transition name="el-fade-in-linear">
+                  <div v-if="schemaProcessing" class="submit-timer-box">
+                    {{ getTabClock('schema') }}
+                  </div>
+                </transition>
                 <el-button
                     type="primary"
                     class="primary-btn"
-                    :loading="loading.schema || loading.processingSchema"
+                    :loading="loading.schema || schemaProcessing"
+                    :disabled="schemaProcessing"
                     @click="submitSchemaUploadSingle"
                     icon="el-icon-upload2">
-                  {{ loading.processingSchema ? '后台处理中...' : '提交文件' }}
+                  {{ schemaProcessing ? '后台处理中...' : '提交文件' }}
                 </el-button>
               </div>
             </el-form>
@@ -113,6 +120,7 @@
               </el-link>
             </div>
 
+            
             <el-form label-position="top" class="sqlbot-form">
               <el-form-item>
                 <el-upload
@@ -124,7 +132,7 @@
                     :limit="20"
                     multiple
                     :file-list="fileListCase"
-                    :disabled="loading.processingCase">
+                    :disabled="caseProcessing">
                   <div class="upload-content">
                     <i class="el-icon-upload upload-icon"></i>
                     <div class="el-upload__text">拖拽或 <em>点击上传</em> 案例文件 (Excel)</div>
@@ -133,13 +141,19 @@
                 </el-upload>
               </el-form-item>
               <div class="form-actions">
+                <transition name="el-fade-in-linear">
+                  <div v-if="caseProcessing" class="submit-timer-box">
+                    {{ getTabClock('case') }}
+                  </div>
+                </transition>
                 <el-button
                     type="primary"
                     class="primary-btn"
-                    :loading="loading.cases || loading.processingCase"
+                    :loading="loading.cases || caseProcessing"
+                    :disabled="caseProcessing"
                     @click="submitCaseUpload"
                     icon="el-icon-upload2">
-                  {{ loading.processingCase ? '后台处理中...' : '提交文件' }}
+                  {{ caseProcessing ? '后台处理中...' : '提交文件' }}
                 </el-button>
               </div>
             </el-form>
@@ -202,6 +216,7 @@
               </el-link>
             </div>
 
+            
             <el-form label-position="top" class="sqlbot-form">
               <el-form-item>
                 <el-upload
@@ -213,7 +228,7 @@
                     :limit="20"
                     multiple
                     :file-list="fileListRules"
-                    :disabled="loading.processingRule">
+                    :disabled="ruleProcessing">
                   <div class="upload-content">
                     <i class="el-icon-files upload-icon"></i>
                     <div class="el-upload__text">拖拽或 <em>点击上传</em> 行业术语文件 (Excel)</div>
@@ -222,13 +237,19 @@
                 </el-upload>
               </el-form-item>
               <div class="form-actions">
+                <transition name="el-fade-in-linear">
+                  <div v-if="ruleProcessing" class="submit-timer-box">
+                    {{ getTabClock('rule') }}
+                  </div>
+                </transition>
                 <el-button
                     type="primary"
                     class="primary-btn"
-                    :loading="loading.rules || loading.processingRule"
+                    :loading="loading.rules || ruleProcessing"
+                    :disabled="ruleProcessing"
                     @click="submitRulesUpload"
                     icon="el-icon-upload2">
-                  {{ loading.processingRule ? '后台处理中...' : '提交文件' }}
+                  {{ ruleProcessing ? '后台处理中...' : '提交文件' }}
                 </el-button>
               </div>
             </el-form>
@@ -287,6 +308,7 @@
               </el-tooltip>
             </div>
 
+            
             <el-form label-position="top" class="sqlbot-form">
               <el-form-item>
                 <el-upload
@@ -298,7 +320,7 @@
                     :limit="20"
                     multiple
                     :file-list="fileListMapping"
-                    :disabled="loading.processingMapping">
+                    :disabled="mappingProcessing">
                   <div class="upload-content">
                     <i class="el-icon-link upload-icon"></i>
                     <div class="el-upload__text">拖拽或 <em>点击上传</em> 部门表映射文件 (Excel)</div>
@@ -307,13 +329,19 @@
                 </el-upload>
               </el-form-item>
               <div class="form-actions">
+                <transition name="el-fade-in-linear">
+                  <div v-if="mappingProcessing" class="submit-timer-box">
+                    {{ getTabClock('mapping') }}
+                  </div>
+                </transition>
                 <el-button
                     type="primary"
                     class="primary-btn"
-                    :loading="loading.mapping || loading.processingMapping"
+                    :loading="loading.mapping || mappingProcessing"
+                    :disabled="mappingProcessing"
                     @click="submitMappingUpload"
                     icon="el-icon-upload2">
-                  {{ loading.processingMapping ? '后台处理中...' : '提交文件' }}
+                  {{ mappingProcessing ? '后台处理中...' : '提交文件' }}
                 </el-button>
               </div>
             </el-form>
@@ -421,40 +449,110 @@ export default {
         mapping: []
       },
 
+      // 后台任务对象字典：{ [tabName]: { taskId, startTime, elapsedSeconds } }
+      processingTasks: {
+        schema: null,
+        case: null,
+        rule: null,
+        mapping: null
+      },
+
+      // 计时器和轮询器映射
+      clockTimers: {
+        schema: null,
+        case: null,
+        rule: null,
+        mapping: null
+      },
+
+      pollingTimers: {
+        schema: null,
+        case: null,
+        rule: null,
+        mapping: null
+      },
+
       // 类别映射字典（对应后端接口期望的 category 参数值）
       categoryMap: {
         schema: 'SchemaDict',    // 数据字典/模式文件
         case: 'CasePair',        // 案例对
         rule: 'BusinessRule',    // 行业术语/规则
         mapping: 'TableMapping'  // 部门表映射
-      },
-
-      // 轮询定时器映射
-      pollingTimers: {
-        schema: null,
-        case: null,
-        rule: null,
-        mapping: null
       }
     };
+  },
+  computed: {
+    schemaProcessing() {
+      return !!(this.processingTasks && this.processingTasks.schema);
+    },
+    caseProcessing() {
+      return !!(this.processingTasks && this.processingTasks.case);
+    },
+    ruleProcessing() {
+      return !!(this.processingTasks && this.processingTasks.rule);
+    },
+    mappingProcessing() {
+      return !!(this.processingTasks && this.processingTasks.mapping);
+    }
   },
   created() {
     const user = JSON.parse(localStorage.getItem('xm-user') || '{}');
     this.username = user.username || 'admin';
+
+    // 如果从其他页面跳转带了 tab query 参数，切换到指定 tab
+    if (this.$route.query && this.$route.query.tab) {
+      this.activeTab = this.$route.query.tab;
+    }
+
     this.fetchHistory(this.activeTab);
-    // 恢复切换页面前未完成的轮询任务
+
+    // 页面挂载/点回来时，检查是否有正在处理中的任务，按 startTime 精确恢复走时与轮询
     this._resumePendingTasks();
   },
   beforeDestroy() {
-    // 只清定时器，不清 localStorage（后台任务可能仍在进行，下次进入页面需要恢复）
-    Object.keys(this.pollingTimers).forEach(key => {
-      if (this.pollingTimers[key]) {
-        clearInterval(this.pollingTimers[key]);
-        this.pollingTimers[key] = null;
-      }
-    });
+    // 切换到其他页面时，清除本页面所有的时钟走时与轮询定时器，确保其他页面绝不显示任何计时器
+    this.clearAllTimers();
   },
   methods: {
+    getTabClock(tabName) {
+      const task = this.processingTasks && this.processingTasks[tabName];
+      return task ? this.formatClock(task.elapsedSeconds) : '00:00';
+    },
+    getTabDuration(tabName) {
+      const task = this.processingTasks && this.processingTasks[tabName];
+      return task ? this.formatDuration(task.elapsedSeconds) : '0秒';
+    },
+    formatClock(totalSeconds) {
+      if (totalSeconds === undefined || totalSeconds === null || isNaN(totalSeconds)) {
+        return '00:00';
+      }
+      const s = Math.max(0, Math.floor(totalSeconds));
+      const hours = Math.floor(s / 3600);
+      const minutes = Math.floor((s % 3600) / 60);
+      const seconds = s % 60;
+      const pad = num => (num < 10 ? '0' + num : '' + num);
+      if (hours > 0) {
+        return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+      }
+      return `${pad(minutes)}:${pad(seconds)}`;
+    },
+    formatDuration(totalSeconds) {
+      if (totalSeconds === undefined || totalSeconds === null || isNaN(totalSeconds)) {
+        return '0秒';
+      }
+      const s = Math.max(0, Math.floor(totalSeconds));
+      if (s < 60) {
+        return `${s}秒`;
+      }
+      const minutes = Math.floor(s / 60);
+      const remSec = s % 60;
+      if (minutes < 60) {
+        return remSec > 0 ? `${minutes}分${remSec}秒` : `${minutes}分钟`;
+      }
+      const hours = Math.floor(minutes / 60);
+      const remMin = minutes % 60;
+      return `${hours}小时${remMin}分`;
+    },
     handleTabClick(tab) {
       this.fetchHistory(tab.name);
     },
@@ -494,7 +592,7 @@ export default {
       const ext = fileName.substring(fileName.lastIndexOf('.') + 1).toLowerCase();
 
       if (!allowedExts.includes(ext)) {
-        this.$message.error(`${label}格式错误，仅支持: ${allowedExts.join(', ')}`);
+        this.$message({ type: 'error', message: `${label}格式错误，仅支持: ${allowedExts.join(', ')}`, duration: 8000, showClose: true });
         if (type === 'singleSchema') this.fileListSingleSchema = [];
         if (type === 'case') this.fileListCase = [];
         if (type === 'rules') this.fileListRules = [];
@@ -517,7 +615,7 @@ export default {
         if (res.data.code === '200') {
           this.historyData[tabName] = res.data.data || [];
         } else {
-          this.$message.error('获取历史记录失败: ' + res.data.msg);
+          this.$message({ type: 'error', message: '获取历史记录失败: ' + res.data.msg, duration: 8000, showClose: true });
         }
       }).catch(err => {
         console.error(err);
@@ -542,9 +640,9 @@ export default {
           reader.onload = () => {
             try {
               const result = JSON.parse(reader.result);
-              this.$message.error(result.message || '下载失败，文件可能不存在');
+              this.$message({ type: 'error', message: result.message || '下载失败，文件可能不存在', duration: 8000, showClose: true });
             } catch (e) {
-              this.$message.error('下载失败，无法解析错误信息');
+              this.$message({ type: 'error', message: '下载失败，无法解析错误信息', duration: 8000, showClose: true });
             }
           };
           reader.readAsText(res.data);
@@ -574,9 +672,9 @@ export default {
       }).catch(err => {
         console.error(err);
         if (err.response && err.response.status === 404) {
-          this.$message.error('下载失败：文件不存在');
+          this.$message({ type: 'error', message: '下载失败：文件不存在', duration: 8000, showClose: true });
         } else {
-          this.$message.error('下载失败：网络错误或服务器异常');
+          this.$message({ type: 'error', message: '下载失败：网络错误或服务器异常', duration: 8000, showClose: true });
         }
       });
     },
@@ -592,47 +690,82 @@ export default {
                 this.$message.success('删除成功');
                 this.fetchHistory(tabName);
               } else {
-                this.$message.error(res.data.msg || '删除失败');
+                this.$message({ type: 'error', message: res.data.msg || '删除失败', duration: 8000, showClose: true });
               }
             })
             .catch(err => {
-              this.$message.error('删除请求异常');
+              this.$message({ type: 'error', message: '删除请求异常', duration: 8000, showClose: true });
             });
       }).catch(() => {});
     },
 
     // --- 持久化辅助方法 ---
-    // 将进行中的 taskId 写入 localStorage，防止切换页面后丢失
-    _savePendingTask(tabName, taskId) {
-      const key = 'xm-pending-tasks';
-      const tasks = JSON.parse(localStorage.getItem(key) || '{}');
-      tasks[tabName] = taskId;
-      localStorage.setItem(key, JSON.stringify(tasks));
+    _savePendingTask(tabName, taskData) {
+      const key = 'xm-pending-tasks-v2';
+      try {
+        const tasks = JSON.parse(localStorage.getItem(key) || '{}');
+        tasks[tabName] = taskData;
+        localStorage.setItem(key, JSON.stringify(tasks));
+      } catch (e) {
+        console.error('[FileUpload] 保存持久化任务失败:', e);
+      }
     },
 
-    // 任务完成/失败后，从 localStorage 移除
     _clearPendingTask(tabName) {
-      const key = 'xm-pending-tasks';
-      const tasks = JSON.parse(localStorage.getItem(key) || '{}');
-      delete tasks[tabName];
-      localStorage.setItem(key, JSON.stringify(tasks));
+      const key = 'xm-pending-tasks-v2';
+      try {
+        const tasks = JSON.parse(localStorage.getItem(key) || '{}');
+        delete tasks[tabName];
+        localStorage.setItem(key, JSON.stringify(tasks));
+      } catch (e) {
+        console.error('[FileUpload] 清除持久化任务失败:', e);
+      }
     },
 
-    // 组件挂载时，检查是否有未完成的任务需要恢复
+    // 页面挂载/点回来时，检查是否有未完成的后台任务需要恢复
     _resumePendingTasks() {
-      const key = 'xm-pending-tasks';
-      const tasks = JSON.parse(localStorage.getItem(key) || '{}');
+      try { localStorage.removeItem('xm-pending-tasks'); } catch (e) {}
+
+      const key = 'xm-pending-tasks-v2';
+      let tasks = {};
+      try {
+        tasks = JSON.parse(localStorage.getItem(key) || '{}');
+      } catch (e) {
+        tasks = {};
+      }
+
+      let hasRunningTask = false;
+      let firstRunningTab = null;
+
       Object.keys(tasks).forEach(tabName => {
-        const taskId = tasks[tabName];
+        const item = tasks[tabName];
+        if (!item) return;
+
+        const taskId = typeof item === 'object' ? item.taskId : item;
+        const startTime = typeof item === 'object' && item.startTime ? item.startTime : Date.now();
+
+        // 避免历史异常僵尸任务：超过 4 小时的任务视为过期丢弃
+        if (Date.now() - startTime > 4 * 3600 * 1000) {
+          this._clearPendingTask(tabName);
+          return;
+        }
+
         if (taskId) {
-          console.log(`[FileUpload] 恢复轮询任务: tabName=${tabName}, taskId=${taskId}`);
-          this.$message.info(`检测到「${this._getTabLabel(tabName)}」文件仍在后台处理，继续监控中...`);
-          this.pollTaskStatus(taskId, tabName);
+          hasRunningTask = true;
+          if (!firstRunningTab) firstRunningTab = tabName;
+          const elapsed = Math.max(0, Math.floor((Date.now() - startTime) / 1000));
+          console.log(`[FileUpload] 精确恢复「${tabName}」处理任务: taskId=${taskId}, 已耗时=${elapsed}秒`);
+          this.startTaskTracker(taskId, tabName, startTime);
         }
       });
+
+      // 友好联动：如果当前处于的 tab 没有运行中任务，而其它 tab 正在处理中，且无指定 query，则自动切到进行中 tab
+      if (hasRunningTask && firstRunningTab && !tasks[this.activeTab] && (!this.$route.query || !this.$route.query.tab)) {
+        this.activeTab = firstRunningTab;
+        this.fetchHistory(firstRunningTab);
+      }
     },
 
-    // 获取 tab 的中文名称（用于提示信息）
     _getTabLabel(tabName) {
       const labelMap = {
         schema: '数据模式',
@@ -643,84 +776,128 @@ export default {
       return labelMap[tabName] || tabName;
     },
 
-    // --- 核心逻辑：异步任务状态轮询 ---
+    // --- 核心逻辑：异步任务跟踪与状态轮询 ---
     pollTaskStatus(taskId, tabName) {
-      // 映射 tabName 到 loading 状态的 key
-      const loadingKeyMap = {
-        'schema': 'processingSchema',
-        'case': 'processingCase',
-        'rule': 'processingRule',
-        'mapping': 'processingMapping'
-      };
-      const loadingKey = loadingKeyMap[tabName];
-      if (!loadingKey) return;
+      if (!taskId) return;
+      this.startTaskTracker(taskId, tabName);
+    },
 
-      // 清除该 tab 之前的定时器
+    startTaskTracker(taskId, tabName, existingStartTime = null) {
+      if (!taskId || !tabName) return;
+
+      const startTime = existingStartTime || Date.now();
+      const initialElapsed = Math.max(0, Math.floor((Date.now() - startTime) / 1000));
+
+      // 1. 设置当前响应式任务数据
+      this.$set(this.processingTasks, tabName, {
+        taskId,
+        startTime,
+        elapsedSeconds: initialElapsed
+      });
+
+      // 2. 本地持久化保存，存储精确的时间戳
+      this._savePendingTask(tabName, { taskId, startTime });
+
+      // 3. 清除该 tab 上已有的定时器
+      this.clearTimerForTab(tabName);
+
+      // 4. 启动实时秒表计时器 (基于 Date.now() - startTime 计算，切换页面再切回绝对精确，永不掉速)
+      this.clockTimers[tabName] = setInterval(() => {
+        if (this.processingTasks[tabName]) {
+          const currentElapsed = Math.max(0, Math.floor((Date.now() - this.processingTasks[tabName].startTime) / 1000));
+          this.$set(this.processingTasks[tabName], 'elapsedSeconds', currentElapsed);
+        }
+      }, 1000);
+
+      // 5. 启动后端任务状态轮询
+      let errorCount = 0;
+      let isCompleted = false;
+
+      const checkStatus = () => {
+        if (isCompleted || !this.processingTasks[tabName]) return;
+
+        fileApi.get(`/files/task/status/${taskId}`)
+          .then(res => {
+            errorCount = 0;
+            const data = res.data && res.data.data;
+            if (!data) return;
+
+            const status = (data.status || '').toLowerCase();
+            if ((status === 'completed' || status === 'success') && !isCompleted) {
+              isCompleted = true;
+              const finalElapsed = this.processingTasks[tabName] ? this.processingTasks[tabName].elapsedSeconds : 0;
+              let costText = this.formatDuration(finalElapsed);
+              if (data.duration && typeof data.duration === 'number') {
+                costText = this.formatDuration(data.duration);
+              } else if (data.costTime && typeof data.costTime === 'number') {
+                costText = this.formatDuration(Math.floor(data.costTime / 1000));
+              } else if (data.result && typeof data.result.duration === 'number') {
+                costText = this.formatDuration(data.result.duration);
+              }
+              this.finishTask(tabName, true, `「${this._getTabLabel(tabName)}」文件处理成功！耗时 ${costText}`);
+            } else if (status === 'failed' || status === 'failure') {
+              isCompleted = true;
+              const errorMsg = data.result ? data.result.error : (data.msg || '未知错误');
+              this.finishTask(tabName, false, `「${this._getTabLabel(tabName)}」文件处理失败: ${errorMsg}`);
+            }
+          })
+          .catch(err => {
+            console.error(`[FileUpload] 轮询任务 ${taskId} 异常:`, err);
+            errorCount++;
+            if (errorCount > 30) {
+              isCompleted = true;
+              this.finishTask(tabName, false, `「${this._getTabLabel(tabName)}」状态查询超时，请稍后刷新列表查看。`);
+            }
+          });
+      };
+
+      // 立即查询一次状态
+      checkStatus();
+      // 随后每 1.5 秒轮询一次
+      this.pollingTimers[tabName] = setInterval(checkStatus, 1500);
+    },
+
+    finishTask(tabName, isSuccess, message) {
+      // 清除定时器
+      this.clearTimerForTab(tabName);
+      // 清除持久化记录
+      this._clearPendingTask(tabName);
+      // 移除处理中状态，小计时器自动消失
+      this.$set(this.processingTasks, tabName, null);
+
+      if (isSuccess) {
+        this.$message.success(message);
+        // 自动刷新历史列表
+        this.fetchHistory(tabName);
+      } else {
+        this.$message.error(message);
+      }
+    },
+
+    clearTimerForTab(tabName) {
+      if (this.clockTimers[tabName]) {
+        clearInterval(this.clockTimers[tabName]);
+        this.clockTimers[tabName] = null;
+      }
       if (this.pollingTimers[tabName]) {
         clearInterval(this.pollingTimers[tabName]);
         this.pollingTimers[tabName] = null;
       }
+    },
 
-      // 持久化 taskId，防止切换页面后丢失
-      this._savePendingTask(tabName, taskId);
-      
-      this.loading[loadingKey] = true;
-      let isCompleted = false;
-      let errorCount = 0; // 连续错误计数
-
-      // 为该 tab 启动独立的定时器
-      this.pollingTimers[tabName] = setInterval(() => {
-        if (isCompleted) {
-          clearInterval(this.pollingTimers[tabName]);
-          this.pollingTimers[tabName] = null;
-          return;
+    clearAllTimers() {
+      Object.keys(this.clockTimers).forEach(tab => {
+        if (this.clockTimers[tab]) {
+          clearInterval(this.clockTimers[tab]);
+          this.clockTimers[tab] = null;
         }
-        
-        fileApi.get(`/files/task/status/${taskId}`)
-            .then(res => {
-              errorCount = 0; // 请求成功，重置错误计数
-              const data = res.data.data;
-              if (!data) return;
-
-              // status == "completed" or "success" 表示成功
-              if ((data.status === 'completed' || data.status === 'success') && !isCompleted) {
-                isCompleted = true; // 标记为已完成
-                clearInterval(this.pollingTimers[tabName]);
-                this.pollingTimers[tabName] = null;
-                this.loading[loadingKey] = false;
-                this._clearPendingTask(tabName); // 清除持久化记录
-                this.$message.success('文件处理成功！');
-                this.fetchHistory(tabName); // 刷新列表
-              }
-              // status == "failed" 表示失败
-              else if (data.status === 'failed' || data.status === 'failure') {
-                isCompleted = true;
-                clearInterval(this.pollingTimers[tabName]);
-                this.pollingTimers[tabName] = null;
-                this.loading[loadingKey] = false;
-                this._clearPendingTask(tabName); // 清除持久化记录
-                const errorMsg = data.result ? data.result.error : '未知错误';
-                this.$message.error(`文件处理失败: ${errorMsg}`);
-              }
-              // status == "processing" -> 继续轮询
-              else {
-                console.log(`Task ${taskId} is processing...`);
-              }
-            })
-            .catch(err => {
-              console.error('轮询出错:', err);
-              errorCount++;
-              // 允许连续失败 20 次 (约 30 秒)，防止由于网络抖动或服务端繁忙导致的短暂超时
-              if (errorCount > 20) {
-                isCompleted = true;
-                clearInterval(this.pollingTimers[tabName]);
-                this.pollingTimers[tabName] = null;
-                this.loading[loadingKey] = false;
-                this._clearPendingTask(tabName); // 清除持久化记录
-                this.$message.error('状态查询超时或失败次数过多，后台任务可能仍在进行，请稍后刷新列表查看结果。');
-              }
-            });
-      }, 1500);
+      });
+      Object.keys(this.pollingTimers).forEach(tab => {
+        if (this.pollingTimers[tab]) {
+          clearInterval(this.pollingTimers[tab]);
+          this.pollingTimers[tab] = null;
+        }
+      });
     },
 
     // 上传 - 模式与字典 (Schema)
@@ -743,15 +920,20 @@ export default {
               this.$message.info('文件上传成功，正在后台处理...');
               this.fileListSingleSchema = [];
               // 启动轮询
-              const taskId = res.data.data.taskId;
-              this.pollTaskStatus(taskId, 'schema');
+              const taskId = res.data.data && (res.data.data.taskId || res.data.data.id);
+              if (taskId) {
+                this.pollTaskStatus(taskId, 'schema');
+              } else {
+                this.$message.warning('文件已上传，但未获取到任务ID，请手动刷新列表查看处理结果');
+                this.fetchHistory('schema');
+              }
             } else {
-              this.$message.error(res.data.msg || '上传失败');
+              this.$message({ type: 'error', message: res.data.msg || '上传失败', duration: 8000, showClose: true });
             }
           })
           .catch(err => {
             this.loading.schema = false;
-            this.$message.error('上传请求异常: ' + err.message);
+            this.$message({ type: 'error', message: '上传请求异常: ' + err.message, duration: 8000, showClose: true });
           });
     },
 
@@ -775,15 +957,36 @@ export default {
               this.$message.info('文件上传成功，正在后台处理...');
               this.fileListCase = [];
               // 启动轮询
-              const taskId = res.data.data.taskId;
-              this.pollTaskStatus(taskId, 'case');
+              const taskId = res.data.data && (res.data.data.taskId || res.data.data.id);
+              if (taskId) {
+                this.pollTaskStatus(taskId, 'case');
+              } else {
+                console.error('[FileUpload] 上传成功但未返回 taskId，完整响应:', JSON.stringify(res.data));
+                this.$message.warning('文件已上传，但未获取到任务ID，请手动刷新列表查看处理结果');
+                this.fetchHistory('case');
+              }
             } else {
-              this.$message.error(res.data.msg || '上传失败');
+              console.error('[FileUpload] 上传返回非200，完整响应:', JSON.stringify(res.data));
+              this.$message({ type: 'error', message: res.data.msg || res.data.message || '上传失败', duration: 8000, showClose: true });
             }
           })
           .catch(err => {
             this.loading.cases = false;
-            this.$message.error('上传请求异常: ' + err.message);
+            console.error('[FileUpload] 案例对上传失败，完整错误:', err);
+            console.error('[FileUpload] err.response:', err.response);
+            // 兼容多种错误格式
+            let errorDetail = '';
+            if (err.response && err.response.data) {
+              const d = err.response.data;
+              errorDetail = d.msg || d.message || d.error || (typeof d === 'string' ? d : JSON.stringify(d));
+            } else if (err.message) {
+              errorDetail = err.message;
+            } else if (typeof err === 'string') {
+              errorDetail = err;
+            } else {
+              errorDetail = '请按F12打开控制台查看详细错误';
+            }
+            this.$message({ type: 'error', message: '上传请求异常: ' + errorDetail, duration: 8000, showClose: true });
           });
     },
 
@@ -807,15 +1010,20 @@ export default {
               this.$message.info('文件上传成功，正在后台处理...');
               this.fileListRules = [];
               // 启动轮询
-              const taskId = res.data.data.taskId;
-              this.pollTaskStatus(taskId, 'rule');
+              const taskId = res.data.data && (res.data.data.taskId || res.data.data.id);
+              if (taskId) {
+                this.pollTaskStatus(taskId, 'rule');
+              } else {
+                this.$message.warning('文件已上传，但未获取到任务ID，请手动刷新列表查看处理结果');
+                this.fetchHistory('rule');
+              }
             } else {
-              this.$message.error(res.data.msg || '上传失败');
+              this.$message({ type: 'error', message: res.data.msg || '上传失败', duration: 8000, showClose: true });
             }
           })
           .catch(err => {
             this.loading.rules = false;
-            this.$message.error('上传请求异常: ' + err.message);
+            this.$message({ type: 'error', message: '上传请求异常: ' + err.message, duration: 8000, showClose: true });
           });
     },
 
@@ -839,15 +1047,20 @@ export default {
               this.$message.info('文件上传成功，正在后台处理...');
               this.fileListMapping = [];
               // 启动轮询
-              const taskId = res.data.data.taskId;
-              this.pollTaskStatus(taskId, 'mapping');
+              const taskId = res.data.data && (res.data.data.taskId || res.data.data.id);
+              if (taskId) {
+                this.pollTaskStatus(taskId, 'mapping');
+              } else {
+                this.$message.warning('文件已上传，但未获取到任务ID，请手动刷新列表查看处理结果');
+                this.fetchHistory('mapping');
+              }
             } else {
-              this.$message.error(res.data.msg || '上传失败');
+              this.$message({ type: 'error', message: res.data.msg || '上传失败', duration: 8000, showClose: true });
             }
           })
           .catch(err => {
             this.loading.mapping = false;
-            this.$message.error('上传请求异常: ' + err.message);
+            this.$message({ type: 'error', message: '上传请求异常: ' + err.message, duration: 8000, showClose: true });
           });
     }
   }
@@ -994,12 +1207,33 @@ export default {
   color: #909399;
 }
 
-/* 按钮右对齐 */
+/* 按钮区域与内嵌小计时器 */
 .form-actions {
   display: flex;
   justify-content: flex-end;
-  margin-top: 10px;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
   margin-bottom: 10px;
+}
+
+.submit-timer-box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 42px;
+  padding: 0 16px;
+  background: #f0f7ff;
+  border: 1px solid #bae0ff;
+  border-radius: 8px;
+  box-shadow: 0 2px 6px rgba(24, 144, 255, 0.08);
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 15px;
+  font-weight: 700;
+  color: #096dd9;
+  letter-spacing: 0.8px;
+  user-select: none;
+  box-sizing: border-box;
 }
 
 .primary-btn {
@@ -1090,4 +1324,5 @@ export default {
   border: 1px solid #dcdfe6;
 }
 .opt-btn:hover { background-color: #e6f7ff; color: #1890ff; border-color: #1890ff; }
-.opt-btn.delete:hover { background-color: #fff1f0; color: #ff4d4f; border-color: #ff4d4f; }</style>
+.opt-btn.delete:hover { background-color: #fff1f0; color: #ff4d4f; border-color: #ff4d4f; }
+</style>
